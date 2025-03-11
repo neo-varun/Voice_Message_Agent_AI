@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Chat - Retro Chat</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='global.css') }}">
+  <style>
+    /* Sidebar layout: active users at top; AI controls at bottom with gap */
+    .chat-sidebar {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      height: 100%;
+    }
+    .ai-controls {
+      padding: 10px 0;
+      margin-bottom: 40px; /* gap matching input level */
+    }
+    /* Rectangular AI Button */
+    .ai-button-creative {
+      background: linear-gradient(145deg, #f2d28b, #d4a373);
+      border: none;
+      color: #2c2c2c;
+      font-size: 18px;
+      padding: 12px;
+      border-radius: 5px;
+      cursor: pointer;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      font-family: 'Courier New', monospace;
+      width: 100%;
+    }
+    .ai-button-creative:hover {
+      transform: scale(1.02);
+      box-shadow: 0 6px 8px rgba(0, 0, 0, 0.3);
+    }
+    /* Optionally hide manual text input for AI-only operation */
+    .input-container {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="chat-container">
+    <!-- Left Sidebar -->
+    <div class="chat-sidebar">
+      <div>
+        <h2>Active Users</h2>
+        <div id="contacts"></div>
+      </div>
+      <div class="ai-controls">
+        <button id="aiButton" class="ai-button-creative">AI Voice Agent</button>
+      </div>
+    </div>
+    <!-- Main Chat Area -->
+    <div class="chat-main">
+      <div class="chat-header">
+        <h2 id="chatRecipient">Select a user to chat</h2>
+      </div>
+      <div id="messages" class="messages"></div>
+      <!-- For AI-only interaction, the manual text input is hidden -->
+      <div class="input-container">
+        <input type="text" id="messageInput" placeholder="Type your message...">
+        <button id="sendButton" class="vintage-button">Send</button>
+      </div>
+    </div>
+  </div>
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <script src="{{ url_for('static', filename='webapp.js') }}" defer></script>
+</body>
+</html>

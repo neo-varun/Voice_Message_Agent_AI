@@ -1,0 +1,165 @@
+/* ---------------------
+   Retro + WhatsApp Layout
+---------------------- */
+
+/* Overall page style */
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Courier New', monospace;
+  background-color: #f2e8d5; /* Retro background */
+  color: #2c2c2c;
+  font-size: 16px;
+}
+
+/* Vintage button style */
+.vintage-button {
+  background-color: #d4a373;
+  color: #2c2c2c;
+  border: none;
+  padding: 10px 20px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 3px 3px 0 #8c6d46;
+}
+
+.vintage-button:hover {
+  background-color: #e6ccb2;
+  box-shadow: 1px 1px 0 #8c6d46;
+}
+
+/* Home page container */
+.home-container {
+  text-align: center;
+  margin-top: 20vh;
+}
+
+/* Profile container */
+.profile-container {
+  max-width: 600px;
+  margin: 50px auto;
+  background-color: #fefae0;
+  padding: 30px;
+  border: 2px solid #8c6d46;
+  box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.profile-picture {
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  border: 3px solid #d4a373;
+  margin-bottom: 20px;
+}
+
+/* ---------------------
+   WHATSAPP-STYLE CHAT
+---------------------- */
+
+.chat-container {
+  display: flex;
+  height: 100vh; /* Occupies full viewport height */
+}
+
+.chat-sidebar {
+  width: 25%;
+  background-color: #e9edc9;
+  padding: 20px;
+  border-right: 2px solid #8c6d46;
+  overflow-y: auto;
+}
+
+.chat-main {
+  width: 75%;
+  display: flex;
+  flex-direction: column;
+  background-color: #fefae0; /* Retro background */
+}
+
+.chat-header {
+  background-color: #d4a373;
+  color: #2c2c2c;
+  padding: 10px;
+  border-bottom: 2px solid #8c6d46;
+  text-align: center;
+}
+
+.messages {
+  flex: 1; /* Expand to fill available space */
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  overflow-y: auto;
+}
+
+/* Input bar at bottom */
+.input-container {
+  display: flex;
+  padding: 10px;
+  border-top: 2px solid #8c6d46;
+}
+
+.input-container input {
+  flex: 1;
+  padding: 10px;
+  font-size: 16px;
+  border: 1px solid #d4a373;
+  border-radius: 4px;
+  margin-right: 10px;
+}
+
+/* CONTACT ITEM */
+.contact-item {
+  margin-bottom: 8px;
+  font-size: 18px;      /* Increased font size */
+  user-select: none;    /* Prevent text highlighting */
+  padding: 8px;
+  border-radius: 4px;
+  transition: background-color 0.3s ease, transform 0.2s ease;
+}
+
+/* Attractive hover effect using a gradient and slight scale-up */
+.contact-item:hover {
+  background: linear-gradient(45deg, #c4d1a2, #b2c293); /* Subtle attractive gradient */
+  transform: scale(1.02);
+  cursor: default; /* Default arrow */
+}
+
+/* MESSAGE BUBBLES */
+.message-bubble {
+  display: inline-block;
+  max-width: 60%;
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 18px;      /* Increased message font size */
+  line-height: 1.4;
+  word-wrap: break-word; /* Prevent text overflow */
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Outgoing (sent) messages on the right now use the light green gradient */
+.message-bubble.sender {
+  align-self: flex-end;
+  background: linear-gradient(135deg, #e9edc9, #d4e0b4); /* Reversed: light gradient */
+  color: #2c2c2c;
+}
+
+.message-bubble.sender:hover {
+  transform: scale(1.02);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+/* Incoming (received) messages on the left now use the darker green gradient */
+.message-bubble.receiver {
+  align-self: flex-start;
+  background: linear-gradient(135deg, #d0e8c8, #bccfa7); /* Reversed: darker gradient */
+  color: #2c2c2c;
+}
+
+.message-bubble.receiver:hover {
+  transform: scale(1.02);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
