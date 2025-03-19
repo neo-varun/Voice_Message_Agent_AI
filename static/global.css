@@ -189,6 +189,27 @@ button {
   background-color: var(--offline);
 }
 
+/* Unread Badge */
+.unread-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-full);
+  background-color: var(--primary);
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  margin-left: auto;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Voice Message - Simplified */
+.message-bubble.voice-message {
+  border-left: 3px solid var(--primary);
+}
+
 /* Main Chat Area */
 .chat-main {
   flex: 1;

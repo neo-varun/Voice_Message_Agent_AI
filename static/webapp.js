@@ -2,6 +2,74 @@ document.addEventListener("DOMContentLoaded", () => {
   // Connect to the Socket.IO server
   const socket = io("https://b32d-115-97-0-225.ngrok-free.app");
   
+  // Request notification permission on page load
+  requestNotificationPermission();
+  
+  // Function to request notification permission
+  function requestNotificationPermission() {
+    if (!("Notification" in window)) {
+      console.log("This browser does not support notifications");
+      return;
+    }
+    
+    if (Notification.permission !== "granted" && Notification.permission !== "denied") {
+      Notification.requestPermission();
+    }
+  }
+  
+  // Show browser notification
+  function showNotification(sender, message) {
+    if (Notification.permission === "granted" && document.visibilityState !== "visible") {
+      const notification = new Notification(`New message from ${sender}`, {
+        body: message.substring(0, 100) + (message.length > 100 ? "..." : ""),
+        icon: "/static/notification-icon.png"
+      });
+      
+      notification.onclick = function() {
+        window.focus();
+        this.close();
+      };
+    }
+  }
+  
+  // Store unread messages count for each user
+  const unreadCounts = {};
+  
+  // Track if user is currently viewing the app
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && currentReceiver) {
+      // Reset unread count when viewing messages from current receiver
+      unreadCounts[currentReceiver] = 0;
+      updateUnreadBadges();
+    }
+  });
+  
+  // Update unread badges in the contact list
+  function updateUnreadBadges() {
+    const contactElements = document.querySelectorAll(".contact-item");
+    contactElements.forEach(el => {
+      const usernameEl = el.querySelector("span:not(.status-indicator)");
+      if (!usernameEl) return;
+      
+      const contactName = usernameEl.textContent;
+      const unreadCount = unreadCounts[contactName] || 0;
+      
+      // Find or create the badge element
+      let badgeEl = el.querySelector(".unread-badge");
+      
+      if (unreadCount > 0) {
+        if (!badgeEl) {
+          badgeEl = document.createElement("span");
+          badgeEl.className = "unread-badge";
+          el.appendChild(badgeEl);
+        }
+        badgeEl.textContent = unreadCount;
+      } else if (badgeEl) {
+        el.removeChild(badgeEl);
+      }
+    });
+  }
+  
   // Ensure non-empty username
   function getUsername() {
     let username = localStorage.getItem("username");
@@ -118,6 +186,15 @@ document.addEventListener("DOMContentLoaded", () => {
         const usernameElement = document.createElement("span");
         usernameElement.textContent = user.username;
         
+        // Add unread badge if there are unread messages
+        const unreadCount = unreadCounts[user.username] || 0;
+        if (unreadCount > 0) {
+          const badge = document.createElement("span");
+          badge.className = "unread-badge";
+          badge.textContent = unreadCount;
+          userElement.appendChild(badge);
+        }
+        
         // Add elements to contact item
         userElement.appendChild(statusIndicator);
         userElement.appendChild(usernameElement);
@@ -127,6 +204,10 @@ document.addEventListener("DOMContentLoaded", () => {
           document.getElementById("chatRecipient").textContent = user.username;
           messagesContainer.innerHTML = "";
           loadChatHistory(user.username);
+          
+          // Reset unread count when selecting a contact
+          unreadCounts[user.username] = 0;
+          updateUnreadBadges();
           
           // Highlight selected contact
           document.querySelectorAll(".contact-item").forEach(el => {
@@ -169,10 +250,11 @@ document.addEventListener("DOMContentLoaded", () => {
           }
         }, 3000);
       } else {
-        messages.forEach(msg => {
-          displayMessage(msg);
-        });
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        // Reset all messages before displaying history
+        messagesContainer.innerHTML = "";
+        
+        // Display messages with slight delay between each for better visual experience
+        displayMessagesWithDelay(messages, 0);
       }
     })
     .catch(error => {
@@ -189,23 +271,61 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
   
+  // Display messages with a slight delay between each for better UX
+  function displayMessagesWithDelay(messages, index) {
+    if (index >= messages.length) {
+      // All messages displayed
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      return;
+    }
+    
+    // Display current message without animations
+    displayMessage(messages[index]);
+    
+    // Display next message with a short delay for smoother loading
+    setTimeout(() => {
+      displayMessagesWithDelay(messages, index + 1);
+    }, 50);
+  }
+  
   socket.on("receive_message", (data) => {
-    // Only process messages addressed to the current user
-    if (data.receiver === username) {
+    // Only process messages addressed to the current user AND not sent by the current user
+    if (data.receiver === username && data.sender !== username) {
       // Create a message object similar to the one from the database
       const messageObj = {
         sender: data.sender,
         receiver: data.receiver,
         content: data.message,
         is_ai_response: false,
+        is_voice_message: data.is_voice_message || false,
         timestamp: new Date().toISOString()
       };
       
-      displayMessage(messageObj);
+      // Show notification for new message
+      showNotification(data.sender, data.message);
       
-      // Only speak the message if it wasn't sent by the current user
-      if (data.sender !== username) {
-        speakMessage(data.message);
+      // Update unread count if not viewing this conversation
+      if (currentReceiver !== data.sender || document.visibilityState !== "visible") {
+        unreadCounts[data.sender] = (unreadCounts[data.sender] || 0) + 1;
+        updateUnreadBadges();
+      }
+      
+      // Only display the message if the sender is the current contact
+      if (currentReceiver === data.sender) {
+        // For voice messages, play the audio first, then show message
+        if (data.is_voice_message) {
+          // Show "listening" effect before the message appears
+          showSystemMessage(`${data.sender} is speaking...`);
+          
+          // Play the voice message with browser's speech synthesis
+          speakVoiceMessage(data.message, () => {
+            // After voice playback is complete, display the message
+            displayMessage(messageObj);
+          });
+        } else {
+          // Regular message - display immediately
+          displayMessage(messageObj);
+        }
       }
     }
   });
@@ -217,6 +337,8 @@ document.addEventListener("DOMContentLoaded", () => {
     
     // All messages use standard styling
     msgDiv.classList.add("message-bubble", type);
+    
+    // Just display the message without animation, regardless of type
     msgDiv.textContent = message.content;
     
     messagesContainer.appendChild(msgDiv);
@@ -225,6 +347,8 @@ document.addEventListener("DOMContentLoaded", () => {
     setTimeout(() => {
       messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }, 0);
+    
+    return msgDiv;
   }
   
   // Helper to create and display message elements
@@ -257,16 +381,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if (message) {
       socket.emit("send_message", { sender: username, receiver: currentReceiver, message });
       
-      // Display the message using the new function
-      displayMessage({
-        sender: username,
-        receiver: currentReceiver,
-        content: message,
-        is_ai_response: false,
-        timestamp: new Date().toISOString()
-      });
-      
       messageInput.value = "";
+      
+      // Reload chat history to show the sent message
+      setTimeout(() => loadChatHistory(currentReceiver), 300);
     }
   }
   
@@ -284,13 +402,28 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 3000);
   }
   
-  // Use browser's built-in TTS to speak the message on the receiver's device
-  function speakMessage(message) {
+  // Play voice message audio and call the callback when done
+  function speakVoiceMessage(message, callback) {
     if ('speechSynthesis' in window) {
-      speechSynthesis.cancel();
+      speechSynthesis.cancel(); // Cancel any ongoing speech
+      
       const utterance = new SpeechSynthesisUtterance(message);
       utterance.lang = "en-US";
+      
+      // Set callback for when speech is complete
+      utterance.onend = () => {
+        if (callback && typeof callback === 'function') {
+          callback();
+        }
+      };
+      
+      // Speak the message
       speechSynthesis.speak(utterance);
+    } else {
+      // If speech synthesis not available, just show the message
+      if (callback && typeof callback === 'function') {
+        callback();
+      }
     }
   }
   
@@ -428,40 +561,27 @@ document.addEventListener("DOMContentLoaded", () => {
                             data.response.toLowerCase().includes("hey,") ||
                             data.response.toLowerCase().startsWith("hey"));
       
-      if (isRelayMessage) {
-        // In relay mode, both sender and receiver see the same reformatted message
-        // Display the reformatted message in sender's UI first
-        createMessageElement(data.response, "outgoing", username);
-        
-        // Send the reformatted message to the recipient
+      // Always use the AI response if available, regardless of whether a user is selected
+      if (data.response && data.response.trim() !== "") {
+        // Send the AI-processed message to the recipient
         socket.emit("send_message", {
           sender: username,
           receiver: finalReceiver,
-          message: data.response
+          message: data.response,
+          is_voice_message: true
         });
       } else {
-        // For normal messages, show and send the original transcript
-        createMessageElement(data.transcript, "outgoing", username);
-        
-        // Send the original message
+        // Fallback to original transcript only if no AI response is available
         socket.emit("send_message", {
           sender: username,
           receiver: finalReceiver,
-          message: data.transcript
+          message: data.transcript,
+          is_voice_message: true
         });
-        
-        // If there's an AI response that's not a relay, show it as an incoming message
-        if (data.response && data.response.trim() !== "") {
-          createMessageElement(data.response, "incoming", finalReceiver);
-          
-          // Send the AI response as a message from the recipient
-          socket.emit("send_message", {
-            sender: finalReceiver,
-            receiver: username,
-            message: data.response
-          });
-        }
       }
+      
+      // Reload chat history to show the sent message
+      setTimeout(() => loadChatHistory(finalReceiver), 300);
       
     } catch (error) {
       messagesContainer.removeChild(loadingMsg);

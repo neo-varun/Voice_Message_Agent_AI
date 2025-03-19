@@ -32,6 +32,7 @@ class Message(db.Model):
     receiver = db.Column(db.String(100), nullable=False)
     content = db.Column(db.Text, nullable=False)
     is_ai_response = db.Column(db.Boolean, default=False)
+    is_voice_message = db.Column(db.Boolean, default=False)
     is_read = db.Column(db.Boolean, default=False)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
     
@@ -42,6 +43,7 @@ class Message(db.Model):
             'receiver': self.receiver,
             'content': self.content,
             'is_ai_response': self.is_ai_response,
+            'is_voice_message': self.is_voice_message,
             'is_read': self.is_read,
             'timestamp': self.timestamp.strftime('%Y-%m-%d %H:%M:%S')
         }
@@ -111,6 +113,7 @@ def initialize_raw_database(dbname='voice_agent', user='postgres', password='200
             receiver VARCHAR(100) NOT NULL,
             content TEXT NOT NULL,
             is_ai_response BOOLEAN DEFAULT FALSE,
+            is_voice_message BOOLEAN DEFAULT FALSE,
             is_read BOOLEAN DEFAULT FALSE,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );

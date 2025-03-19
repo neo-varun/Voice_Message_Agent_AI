@@ -241,10 +241,16 @@ def process_message(transcript, sender_username, receiver_username=None):
 
             User {sender_username} has sent a direct message to {receiver_username if receiver_username else "someone"}.
             
-            Message: "{transcript}"
+            Original message: "{transcript}"
             
-            If this appears to be a direct message, simply respond in a helpful, concise way as if you are {receiver_username}.
-            Don't mention that you're an AI.
+            Convert this into a natural-sounding message. You should keep the same meaning but make it sound more polished.
+            Do not add any AI-related phrases or mentions of being an assistant.
+            
+            Examples:
+            - Original: "tell her I'll meet at 5" → "I'll meet you at 5"
+            - Original: "going to the store need anything" → "I'm going to the store. Do you need anything?"
+            
+            Keep your response concise and conversational.
             """
         
         # Call OpenAI API to generate a response

@@ -119,6 +119,7 @@ def handle_send_message(data):
         sender = data.get("sender")
         receiver = data.get("receiver")
         message_content = data.get("message", "")
+        is_voice_message = data.get("is_voice_message", False)
 
         # Get user records
         sender_user = User.query.filter_by(username=sender).first()
@@ -133,7 +134,8 @@ def handle_send_message(data):
             sender=sender,
             receiver=receiver,
             content=message_content,
-            is_ai_response=False
+            is_ai_response=False,
+            is_voice_message=is_voice_message
         )
         db.session.add(user_message)
         db.session.commit()
@@ -142,7 +144,8 @@ def handle_send_message(data):
         payload = {
             "sender": sender, 
             "receiver": receiver, 
-            "message": message_content
+            "message": message_content,
+            "is_voice_message": is_voice_message
         }
 
         # Emit the message to the receiver's socket (if connected)
