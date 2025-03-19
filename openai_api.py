@@ -1,99 +1,266 @@
+import os
 import logging
-import psycopg2
-from psycopg2 import sql
-import re
 from openai import OpenAI
+from pinecone_database import retrieve_relevant_contexts
+from database_schema import User
+from dotenv import load_dotenv
 
-# Create an instance of the OpenAI client.
-client = OpenAI()
+# Load environment variables
+load_dotenv()
 
+# Set up logging
 logging.basicConfig(level=logging.DEBUG)
 
-def get_db_connection():
-    """
-    Securely create and return a database connection.
-    Here, the database name is 'voice_agent' (ensure it exists).
-    """
-    return psycopg2.connect(
-        dbname='voice_agent',
-        user='postgres',
-        password='2003',
-        host='127.0.0.1',
-        port='1234'
-    )
+# Initialize OpenAI client
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-def is_valid_username(username):
+def validate_contact(detected_name, available_contacts):
     """
-    Validate the username.
-    This allows letters, numbers, underscores, hyphens, and periods.
+    Validate a detected contact name against the list of available contacts.
+    Performs case-insensitive matching and returns the correctly-cased contact name.
+    
+    Args:
+        detected_name (str): The detected contact name
+        available_contacts (list): List of available contact names
+        
+    Returns:
+        str or None: The validated contact name with correct casing, or None if no match
     """
-    return re.match(r'^[\w\.-]+$', username) is not None
+    if not detected_name or not available_contacts:
+        return None
+        
+    # Normalize the detected name (lowercase, strip whitespace)
+    normalized_name = detected_name.lower().strip()
+    
+    # Check for exact match first (case insensitive)
+    for contact in available_contacts:
+        if contact.lower().strip() == normalized_name:
+            return contact  # Return the correctly cased version
+    
+    # No exact match found
+    return None
 
-def get_user_personality(username):
+def detect_contact_from_transcript(transcript, sender_username, available_contacts):
     """
-    Retrieve the stored personality for a user securely from the 'users' table.
-    Logs the username being retrieved and returns the personality value if found.
+    Use OpenAI to detect a contact name from a transcript.
+    
+    Args:
+        transcript (str): The voice message transcript
+        sender_username (str): Username of the sender
+        available_contacts (list): List of available contact usernames
+        
+    Returns:
+        str or None: Detected contact name, or None if no contact detected
     """
-    logging.debug(f"Retrieving personality for username: '{username}'")
+    if not transcript or transcript.strip() == "":
+        logging.warning("Empty transcript provided for contact detection")
+        return None
+        
+    if not available_contacts or len(available_contacts) == 0:
+        logging.warning("No available contacts provided for detection")
+        return None
     
-    with get_db_connection() as conn:
-        with conn.cursor() as cursor:
-            query = sql.SQL("SELECT personality FROM users WHERE username = %s")
-            cursor.execute(query, (username,))
-            result = cursor.fetchone()
-            if result:
-                logging.debug(f"Retrieved personality for {username}: {result[0]}")
-                return result[0]
-            else:
-                logging.debug(f"No personality found for user: {username}")
-            return None
-
-def generate_personalized_response(username, message):
-    """
-    Generate an AI response tailored to the user's personality and conversation context.
-    
-    The assistant is instructed to rephrase the user's message into a direct, friendly query
-    on behalf of the user. The expected output should begin with a greeting like:
-      "Hey [Recipient], [username] wants to know if ..."
-    
-    In this version, the user's message is inserted without surrounding double quotes.
-    """
-    # Retrieve the user's personality from the database.
-    user_personality = get_user_personality(username)
-    if not user_personality:
-        return "I don't know much about you yet. Tell me about yourself!"
-    
-    # Construct a clear and concise prompt without double quotes around the message.
-    full_context = (
-        f"You are {username}'s assistant. {username}'s personality is: {user_personality}.\n"
-        f"{username} says: {message}\n"
-        "Rephrase this message into a direct, friendly query addressed to the recipient. "
-        "The output should start with 'Hey [Recipient], {username} wants to know if ...'."
-    )
+    logging.info(f"Detecting contact from transcript: '{transcript}'")
+    logging.info(f"Available contacts: {available_contacts}")
     
     try:
-        ai_response = client.chat.completions.create(
+        # Format available contacts as a comma-separated list
+        contacts_str = ", ".join(available_contacts)
+        
+        # Create a prompt for OpenAI to detect a contact name
+        prompt = f"""
+        Analyze this message: "{transcript}"
+        
+        Determine if the message is intended for a specific contact from this list: {contacts_str}
+        
+        Rules:
+        1. If a contact name is clearly mentioned (e.g., "Tell John..." or "Ask Sarah...", "Hey Mike,..."), extract ONLY that name.
+        2. Look specifically for relay patterns like "tell X", "ask X", "let X know", "check with X", etc.
+        3. Return ONLY the exact name from the provided list that matches.
+        4. If multiple contacts are mentioned, return the primary recipient only.
+        5. If no contact is clearly identified as the intended recipient or you're uncertain, return "NONE".
+        
+        Return ONLY the contact name or "NONE" with no additional text.
+        """
+        
+        # Call OpenAI API to analyze the transcript
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You extract contact names from messages. Return ONLY the name or NONE."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=50,
+            temperature=0.0
+        )
+        
+        # Extract the detected contact name
+        detected_name = response.choices[0].message.content.strip()
+        logging.info(f"OpenAI detected: '{detected_name}'")
+        
+        # If OpenAI says "NONE", return None
+        if detected_name.upper() == "NONE":
+            return None
+            
+        # Validate the detected name against available contacts
+        validated_contact = validate_contact(detected_name, available_contacts)
+        
+        if validated_contact:
+            logging.info(f"Validated contact: '{validated_contact}'")
+            return validated_contact
+        else:
+            logging.warning(f"Detected name '{detected_name}' didn't match any available contacts")
+            return None
+            
+    except Exception as e:
+        logging.error(f"Error in contact detection: {str(e)}")
+        return None
+
+def generate_response(username, message, receiver=None):
+    """Generate an AI response with conversation context"""
+    # Get conversation context if available
+    conversation_context = ""
+    if receiver:
+        # Retrieve context
+        contexts = retrieve_relevant_contexts(
+            query_text=message,
+            user1=username,
+            user2=receiver,
+            top_k=1
+        )
+        if contexts:
+            conversation_context = contexts[0]['text']
+    
+    # Build simplified prompt
+    if conversation_context:
+        prompt = f"Context: {conversation_context}\n{username}'s message: {message}\nRespond as {username} to {receiver}: "
+    else:
+        prompt = f"{username}'s message: {message}\nRespond as {username}: "
+    
+    try:
+        response = client.chat.completions.create(
             model="gpt-4o-mini-2024-07-18",
             messages=[
-                {"role": "system", "content": f"You are a friendly and clear voice assistant representing {username}."},
-                {"role": "user", "content": full_context}
+                {"role": "system", "content": f"You are {username}'s assistant. Be concise and friendly."},
+                {"role": "user", "content": prompt}
             ],
             temperature=0.6,
             max_tokens=150
         )
-        return ai_response.choices[0].message.content.strip()
-    
+        return response.choices[0].message.content.strip()
     except Exception as e:
         logging.error(f"OpenAI API Error: {str(e)}")
-        return "I'm having trouble understanding right now. Try again later."
+        return "I'm having trouble understanding right now."
 
-def process_transcript_with_llm(username: str, transcript: str) -> str:
-    """
-    Process a user's transcript using OpenAI with personalized context.
-    Delegates processing to generate_personalized_response.
-    """
+def process_transcript_with_llm(username, transcript, receiver=None):
+    """Process a transcript using the LLM"""
     try:
-        return generate_personalized_response(username, transcript)
+        return generate_response(username, transcript, receiver)
     except Exception as e:
         logging.error(f"Error processing transcript: {str(e)}")
         return "Sorry, I encountered an issue processing your request."
+
+def transcribe_audio(audio_file_path):
+    """
+    Transcribe an audio file using OpenAI's Whisper model.
+    
+    Args:
+        audio_file_path (str): Path to the audio file
+        
+    Returns:
+        str: The transcribed text
+    """
+    try:
+        logging.info(f"Transcribing audio file: {audio_file_path}")
+        
+        # Open the audio file
+        with open(audio_file_path, "rb") as audio_file:
+            # Call the OpenAI API to transcribe the audio
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file
+            )
+            
+        # Return the transcribed text
+        logging.info(f"Transcription completed: {transcript.text[:50]}...")
+        return transcript.text
+        
+    except Exception as e:
+        logging.error(f"Error transcribing audio: {str(e)}")
+        raise
+
+def process_message(transcript, sender_username, receiver_username=None):
+    """
+    Process a message with OpenAI to generate a response.
+    
+    Args:
+        transcript (str): The message transcript
+        sender_username (str): Username of the sender
+        receiver_username (str, optional): Username of the receiver
+        
+    Returns:
+        str: The generated response
+    """
+    try:
+        # Check if this seems like a relay message
+        relay_patterns = [
+            "tell", "ask", "let", "inform", "message", 
+            "send to", "contact", "check with", "relay to",
+            "pass", "communicate", "for"
+        ]
+        
+        is_likely_relay = False
+        lower_transcript = transcript.lower()
+        
+        for pattern in relay_patterns:
+            if pattern in lower_transcript and receiver_username:
+                is_likely_relay = True
+                break
+        
+        # Create appropriate prompt based on message type
+        if is_likely_relay:
+            prompt = f"""
+            You are an assistant helping relay messages between users.
+
+            User {sender_username} has sent a message that appears to be intended for {receiver_username}.
+            
+            Original message: "{transcript}"
+            
+            Reformulate this as a relay message from {sender_username} to {receiver_username}.
+            
+            ALWAYS start with "Hey, {sender_username}" and then rewrite the message as a relay.
+            For example:
+            - If original is "Tell John I'll be at Vesapur on Monday", respond with "Hey, [sender] wanted me to let you know they'll be at Vesapur on Monday"
+            - If original is "Ask Sarah if she has the documents", respond with "Hey, [sender] wants to know if you have the documents"
+            
+            Keep your response conversational, concise, and natural. Don't add any AI-related text.
+            """
+        else:
+            prompt = f"""
+            You are an assistant helping with a voice messaging app.
+
+            User {sender_username} has sent a direct message to {receiver_username if receiver_username else "someone"}.
+            
+            Message: "{transcript}"
+            
+            If this appears to be a direct message, simply respond in a helpful, concise way as if you are {receiver_username}.
+            Don't mention that you're an AI.
+            """
+        
+        # Call OpenAI API to generate a response
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that relays messages between users in a natural way."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=150
+        )
+        
+        # Extract the generated response
+        return response.choices[0].message.content.strip()
+        
+    except Exception as e:
+        logging.error(f"Error processing message: {str(e)}")
+        return f"Error processing message: {str(e)}"
