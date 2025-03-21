@@ -1,6 +1,38 @@
 document.addEventListener("DOMContentLoaded", () => {
   // Connect to the Socket.IO server
-  const socket = io("https://b32d-115-97-0-225.ngrok-free.app");
+  const socket = io("https://56ba-115-97-0-225.ngrok-free.app");
+  
+  // Create chat container
+  const chatContainer = document.querySelector(".chat-container");
+  
+  // Initially hide the chat interface
+  if (chatContainer) {
+    chatContainer.style.display = "none";
+  }
+  
+  // Define global variables
+  let username;
+  let currentReceiver = null;
+  let messagesContainer;
+  let contactsContainer;
+  let aiButton;
+  let sendButton;
+  let messageInput;
+  let settingsButton;
+  let settingsMenu;
+  let sttModelSelect;
+  let ttsVoiceSelect;
+  let waveform;
+  let listeningIndicator;
+  let emptyStateContainer;
+  
+  // Voice recording variables
+  let aiRecording = false;
+  let aiMediaRecorder;
+  let aiAudioChunks = [];
+  
+  // Store unread messages count for each user
+  const unreadCounts = {};
   
   // Request notification permission on page load
   requestNotificationPermission();
@@ -31,9 +63,6 @@ document.addEventListener("DOMContentLoaded", () => {
       };
     }
   }
-  
-  // Store unread messages count for each user
-  const unreadCounts = {};
   
   // Track if user is currently viewing the app
   document.addEventListener("visibilitychange", () => {
@@ -73,27 +102,15 @@ document.addEventListener("DOMContentLoaded", () => {
   // Ensure non-empty username
   function getUsername() {
     let username = localStorage.getItem("username");
-    while (!username || !username.trim()) {
-      username = prompt("Enter your username:") || ("User" + Math.floor(Math.random() * 1000));
+    
+    // If no username in storage, redirect to login page
+    if (!username || !username.trim()) {
+      window.location.href = "/login";
+      return null;
     }
-    localStorage.setItem("username", username);
+    
     return username;
   }
-  
-  const username = getUsername();
-  
-  let currentReceiver = null;
-  const messagesContainer = document.getElementById("messages");
-  const contactsContainer = document.getElementById("contacts");
-  const aiButton = document.getElementById("aiButton");
-  const sendButton = document.getElementById("sendButton");
-  const messageInput = document.getElementById("messageInput");
-  
-  // Settings elements
-  const settingsButton = document.getElementById("settingsButton");
-  const settingsMenu = document.getElementById("settingsMenu");
-  const sttModelSelect = document.getElementById("sttModel");
-  const ttsVoiceSelect = document.getElementById("ttsVoice");
   
   // Initialize settings from localStorage or set defaults
   function initSettings() {
@@ -113,36 +130,142 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
   
-  // Toggle settings menu
-  settingsButton.addEventListener("click", (e) => {
-    e.stopPropagation();
-    settingsMenu.classList.toggle("active");
-  });
-  
-  // Close settings when clicking elsewhere
-  document.addEventListener("click", (e) => {
-    if (
-      settingsMenu.classList.contains("active") && 
-      !settingsMenu.contains(e.target) && 
-      e.target !== settingsButton
-    ) {
-      settingsMenu.classList.remove("active");
+  // Get username and initialize app only if we have one
+  const initializeApp = () => {
+    username = getUsername();
+    
+    // If getUsername returned null, we're being redirected to login
+    // So don't continue with initialization
+    if (!username) {
+      return;
     }
-  });
+    
+    // Show the chat interface
+    if (chatContainer) {
+      chatContainer.style.display = "flex";
+    }
+    
+    // Initialize DOM elements
+    messagesContainer = document.getElementById("messages");
+    contactsContainer = document.getElementById("contacts");
+    aiButton = document.getElementById("aiButton");
+    sendButton = document.getElementById("sendButton");
+    messageInput = document.getElementById("messageInput");
+    waveform = document.getElementById("waveform");
+    listeningIndicator = document.getElementById("listeningIndicator");
+    emptyStateContainer = document.getElementById("emptyStateContainer");
+    
+    // Initialize empty state with waveform visualization
+    if (emptyStateContainer) {
+      emptyStateContainer.style.display = "flex";
+    }
   
-  // Initialize settings
-  initSettings();
+    // Settings elements
+    settingsButton = document.getElementById("settingsButton");
+    settingsMenu = document.getElementById("settingsMenu");
+    sttModelSelect = document.getElementById("sttModel");
+    ttsVoiceSelect = document.getElementById("ttsVoice");
+
+    // Toggle settings menu
+    settingsButton.addEventListener("click", (e) => {
+      e.stopPropagation();
+      settingsMenu.classList.toggle("active");
+    });
+    
+    // Close settings when clicking elsewhere
+    document.addEventListener("click", (e) => {
+      if (
+        settingsMenu.classList.contains("active") && 
+        !settingsMenu.contains(e.target) && 
+        e.target !== settingsButton
+      ) {
+        settingsMenu.classList.remove("active");
+      }
+    });
+    
+    // Initialize settings
+    initSettings();
+    
+    // Set up event handlers
+    sendButton.addEventListener("click", sendTextMessage);
+    messageInput.addEventListener("keypress", (e) => { 
+      if (e.key === "Enter") sendTextMessage();
+    });
+    
+    // Set up voice message recording
+    aiButton.addEventListener("click", handleVoiceRecording);
+    
+    // Set up logout button
+    const logoutButton = document.getElementById("logoutButton");
+    if (logoutButton) {
+      logoutButton.addEventListener("click", () => {
+        // Clear username from localStorage
+        localStorage.removeItem("username");
+        
+        // Disconnect socket before redirecting
+        if (socket && socket.connected) {
+          socket.disconnect();
+        }
+        
+        // Redirect to login page
+        window.location.href = "/login";
+      });
+    }
+    
+    // Ensure socket connection and join the chat
+    if (socket) {
+      if (!socket.connected) {
+        socket.connect();
+      }
+      socket.emit("join", { username });
+    }
+    
+    // Initial load of all users when page loads
+    fetchAllUsers();
+    
+    // Update user list when status changes
+    socket.on("user_status_update", (data) => {
+      updateUserList(data.all_users);
+    });
+    
+    // Listen for messages
+    socket.on("receive_message", (data) => {
+      // Create a message object similar to the one from the database
+      const messageObj = {
+        sender: data.sender,
+        receiver: data.receiver,
+        content: data.message,
+        is_ai_response: false,
+        is_voice_message: data.is_voice_message || false,
+        timestamp: new Date().toISOString()
+      };
+
+      // Case 1: Message from another user to the current user
+      if (data.receiver === username && data.sender !== username) {
+        // Show notification for new message
+        showNotification(data.sender, data.message);
+        
+        // Update unread count if not viewing this conversation
+        if (currentReceiver !== data.sender || document.visibilityState !== "visible") {
+          unreadCounts[data.sender] = (unreadCounts[data.sender] || 0) + 1;
+          updateUnreadBadges();
+        }
+        
+        // Only display the message if the sender is the current contact
+        if (currentReceiver === data.sender) {
+          displayMessage(messageObj);
+        }
+      }
+      // Case 2: Message sent by current user to someone else
+      else if (data.sender === username && data.receiver === currentReceiver) {
+        // Display message from current user
+        displayMessage(messageObj);
+      }
+    });
+  };
   
-  // Join the chat
-  socket.emit("join", { username });
-  
-  // Initial load of all users when page loads
-  fetchAllUsers();
-  
-  // Update user list when status changes
-  socket.on("user_status_update", (data) => {
-    updateUserList(data.all_users);
-  });
+  // Start the app initialization
+  initializeApp();
   
   // Fetch all users from the server
   function fetchAllUsers() {
@@ -214,6 +337,11 @@ document.addEventListener("DOMContentLoaded", () => {
             el.classList.remove("selected");
           });
           userElement.classList.add("selected");
+          
+          // Hide empty state when a contact is selected
+          if (emptyStateContainer) {
+            emptyStateContainer.style.display = "none";
+          }
         });
         
         contactsContainer.appendChild(userElement);
@@ -223,6 +351,22 @@ document.addEventListener("DOMContentLoaded", () => {
   
   // Load chat history
   function loadChatHistory(selectedUser) {
+    // Hide the empty state container when loading chat history
+    if (emptyStateContainer) {
+      emptyStateContainer.style.display = "none";
+    }
+    
+    // Clear any existing content first
+    messagesContainer.innerHTML = "";
+    
+    // Remove any existing loading messages first
+    const existingLoadingMsgs = messagesContainer.querySelectorAll(".loading-message");
+    existingLoadingMsgs.forEach(msg => {
+      if (msg.parentNode) {
+        messagesContainer.removeChild(msg);
+      }
+    });
+    
     const loadingMsg = document.createElement("div");
     loadingMsg.textContent = "Loading messages";
     loadingMsg.classList.add("loading-message");
@@ -238,31 +382,52 @@ document.addEventListener("DOMContentLoaded", () => {
       return response.json();
     })
     .then(messages => {
-      messagesContainer.removeChild(loadingMsg);
+      // Remove loading message
+      if (loadingMsg.parentNode) {
+        messagesContainer.removeChild(loadingMsg);
+      }
+      
+      // Reset all messages before displaying history
+      messagesContainer.innerHTML = "";
+      
       if (messages.length === 0) {
         const noMsg = document.createElement("div");
         noMsg.textContent = "No messages yet";
         noMsg.classList.add("message-bubble", "system");
         messagesContainer.appendChild(noMsg);
+        
+        // Ensure even empty chat is scrolled to bottom
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        
         setTimeout(() => {
           if (noMsg.parentNode) {
             messagesContainer.removeChild(noMsg);
           }
         }, 3000);
       } else {
-        // Reset all messages before displaying history
-        messagesContainer.innerHTML = "";
+        // Display all messages at once without delay
+        messages.forEach(message => {
+          displayMessage(message);
+        });
         
-        // Display messages with slight delay between each for better visual experience
-        displayMessagesWithDelay(messages, 0);
+        // Scroll to bottom once
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
       }
     })
     .catch(error => {
-      if (loadingMsg.parentNode) messagesContainer.removeChild(loadingMsg);
+      // Clean up the loading message
+      if (loadingMsg.parentNode) {
+        messagesContainer.removeChild(loadingMsg);
+      }
+      
       const errMsg = document.createElement("div");
       errMsg.textContent = "Could not load messages";
       errMsg.classList.add("message-bubble", "system");
       messagesContainer.appendChild(errMsg);
+      
+      // Ensure error message is visible
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      
       setTimeout(() => {
         if (errMsg.parentNode) {
           messagesContainer.removeChild(errMsg);
@@ -274,61 +439,17 @@ document.addEventListener("DOMContentLoaded", () => {
   // Display messages with a slight delay between each for better UX
   function displayMessagesWithDelay(messages, index) {
     if (index >= messages.length) {
-      // All messages displayed
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
       return;
     }
     
-    // Display current message without animations
-    displayMessage(messages[index]);
+    // Display all messages immediately without animation
+    messages.forEach(message => {
+      displayMessage(message);
+    });
     
-    // Display next message with a short delay for smoother loading
-    setTimeout(() => {
-      displayMessagesWithDelay(messages, index + 1);
-    }, 50);
+    // Scroll to bottom once after all messages are loaded
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
   }
-  
-  socket.on("receive_message", (data) => {
-    // Only process messages addressed to the current user AND not sent by the current user
-    if (data.receiver === username && data.sender !== username) {
-      // Create a message object similar to the one from the database
-      const messageObj = {
-        sender: data.sender,
-        receiver: data.receiver,
-        content: data.message,
-        is_ai_response: false,
-        is_voice_message: data.is_voice_message || false,
-        timestamp: new Date().toISOString()
-      };
-      
-      // Show notification for new message
-      showNotification(data.sender, data.message);
-      
-      // Update unread count if not viewing this conversation
-      if (currentReceiver !== data.sender || document.visibilityState !== "visible") {
-        unreadCounts[data.sender] = (unreadCounts[data.sender] || 0) + 1;
-        updateUnreadBadges();
-      }
-      
-      // Only display the message if the sender is the current contact
-      if (currentReceiver === data.sender) {
-        // For voice messages, play the audio first, then show message
-        if (data.is_voice_message) {
-          // Show "listening" effect before the message appears
-          showSystemMessage(`${data.sender} is speaking...`);
-          
-          // Play the voice message with browser's speech synthesis
-          speakVoiceMessage(data.message, () => {
-            // After voice playback is complete, display the message
-            displayMessage(messageObj);
-          });
-        } else {
-          // Regular message - display immediately
-          displayMessage(messageObj);
-        }
-      }
-    }
-  });
   
   // Helper to display a message with appropriate styling
   function displayMessage(message) {
@@ -344,33 +465,10 @@ document.addEventListener("DOMContentLoaded", () => {
     messagesContainer.appendChild(msgDiv);
     
     // Ensure scroll to bottom is executed after the DOM has updated
-    setTimeout(() => {
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }, 0);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
     
     return msgDiv;
   }
-  
-  // Helper to create and display message elements
-  function createMessageElement(content, type, senderName) {
-    if (!content || content.trim() === "") return;
-    
-    const msgDiv = document.createElement("div");
-    msgDiv.classList.add("message-bubble", type);
-    msgDiv.textContent = content;
-    
-    messagesContainer.appendChild(msgDiv);
-    
-    // Ensure scroll to bottom is executed after the DOM has updated
-    setTimeout(() => {
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }, 0);
-  }
-  
-  sendButton.addEventListener("click", sendTextMessage);
-  messageInput.addEventListener("keypress", (e) => { 
-    if (e.key === "Enter") sendTextMessage();
-  });
   
   function sendTextMessage() {
     if (!currentReceiver) {
@@ -379,96 +477,60 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     const message = messageInput.value.trim();
     if (message) {
-      socket.emit("send_message", { sender: username, receiver: currentReceiver, message });
-      
+      // Clear input first
       messageInput.value = "";
       
-      // Reload chat history to show the sent message
-      setTimeout(() => loadChatHistory(currentReceiver), 300);
+      // Create and display the message locally for immediate feedback
+      const msgObj = {
+        sender: username,
+        receiver: currentReceiver,
+        content: message,
+        timestamp: new Date().toISOString()
+      };
+      
+      // Display the message immediately
+      displayMessage(msgObj);
+      
+      // Then send it to the server
+      socket.emit("send_message", { sender: username, receiver: currentReceiver, message });
     }
   }
   
   // Helper to display system messages
-  function showSystemMessage(text) {
+  function showSystemMessage(text, isDurable = false) {
+    // Verify messagesContainer exists
+    if (!messagesContainer) {
+      console.error("Messages container not found");
+      return;
+    }
+    
+    // Remove any existing system messages first
+    const existingSystemMessages = messagesContainer.querySelectorAll(".message-bubble.system");
+    existingSystemMessages.forEach(msg => {
+      if (msg.parentNode) {
+        messagesContainer.removeChild(msg);
+      }
+    });
+    
     const msgDiv = document.createElement("div");
     msgDiv.classList.add("message-bubble", "system");
     msgDiv.textContent = text;
     messagesContainer.appendChild(msgDiv);
     
-    setTimeout(() => {
-      if (msgDiv.parentNode) {
-        messagesContainer.removeChild(msgDiv);
-      }
-    }, 3000);
-  }
-  
-  // Play voice message audio and call the callback when done
-  function speakVoiceMessage(message, callback) {
-    if ('speechSynthesis' in window) {
-      speechSynthesis.cancel(); // Cancel any ongoing speech
-      
-      const utterance = new SpeechSynthesisUtterance(message);
-      utterance.lang = "en-US";
-      
-      // Set callback for when speech is complete
-      utterance.onend = () => {
-        if (callback && typeof callback === 'function') {
-          callback();
+    // Ensure message is visible by scrolling
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    
+    // Only auto-remove non-durable messages
+    if (!isDurable) {
+      setTimeout(() => {
+        if (msgDiv.parentNode) {
+          messagesContainer.removeChild(msgDiv);
         }
-      };
-      
-      // Speak the message
-      speechSynthesis.speak(utterance);
-    } else {
-      // If speech synthesis not available, just show the message
-      if (callback && typeof callback === 'function') {
-        callback();
-      }
+      }, 3000);
     }
+    
+    return msgDiv;
   }
-  
-  // Voice recording logic
-  let aiRecording = false;
-  let aiMediaRecorder;
-  let aiAudioChunks = [];
-  
-  aiButton.addEventListener("click", () => {
-    if (!aiRecording) {
-      // Start recording - no need to check for currentReceiver anymore
-      aiButton.classList.add("recording");
-      aiButton.querySelector("span").textContent = "Recording...";
-      
-      navigator.mediaDevices.getUserMedia({ audio: true })
-      .then((stream) => {
-        aiMediaRecorder = new MediaRecorder(stream);
-        aiMediaRecorder.start();
-        aiRecording = true;
-        aiAudioChunks = [];
-        
-        aiMediaRecorder.addEventListener("dataavailable", (event) => {
-          aiAudioChunks.push(event.data);
-        });
-        
-        aiMediaRecorder.addEventListener("stop", () => {
-          aiRecording = false;
-          aiButton.classList.remove("recording");
-          aiButton.querySelector("span").textContent = "Voice Message";
-          
-          // Create a Blob from recorded chunks
-          const audioBlob = new Blob(aiAudioChunks, { type: "audio/webm" });
-          processAudio(audioBlob);
-        });
-      })
-      .catch(err => {
-        aiButton.classList.remove("recording");
-        aiButton.querySelector("span").textContent = "Voice Message";
-        showSystemMessage("Microphone access denied");
-      });
-    } else if (aiMediaRecorder && aiMediaRecorder.state !== "inactive") {
-      // Stop recording
-      aiMediaRecorder.stop();
-    }
-  });
   
   // Function to process audio blob and send to server
   async function processAudio(audioBlob) {
@@ -484,6 +546,14 @@ document.addEventListener("DOMContentLoaded", () => {
     // Add parameter to indicate if we should use name detection
     // If a receiver is already selected, we don't need name detection
     formData.append("use_name_detection", currentReceiver ? "false" : "true");
+    
+    // Remove any existing loading messages and system messages
+    const existingMessages = messagesContainer.querySelectorAll(".loading-message, .message-bubble.system");
+    existingMessages.forEach(msg => {
+      if (msg.parentNode) {
+        messagesContainer.removeChild(msg);
+      }
+    });
     
     // Show processing message
     const loadingMsg = document.createElement("div");
@@ -504,10 +574,14 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       
       const data = await response.json();
-      messagesContainer.removeChild(loadingMsg);
+      
+      // Remove loading message
+      if (loadingMsg.parentNode) {
+        messagesContainer.removeChild(loadingMsg);
+      }
       
       if (data.error) {
-        showSystemMessage("Error: " + data.error);
+        showSystemMessage("Error: " + data.error, true);
         return;
       }
       
@@ -516,13 +590,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const finalReceiver = currentReceiver || data.detected_receiver;
       
       if (!finalReceiver) {
-        // More informative error message
-        if (currentReceiver) {
-          showSystemMessage(`Sending message to ${currentReceiver}`);
-        } else {
-          showSystemMessage("No recipient detected. Please select a contact or mention a name clearly.");
-          return;
-        }
+        // Error - no recipient detected
+        showSystemMessage("No recipient detected. Please select a contact or mention a name clearly.", true);
+        return;
       }
       
       // If a receiver was detected from transcript and it's different from current, update the UI
@@ -533,59 +603,39 @@ document.addEventListener("DOMContentLoaded", () => {
         contactElements.forEach(el => {
           const usernameEl = el.querySelector("span:not(.status-indicator)");
           if (usernameEl && usernameEl.textContent === data.detected_receiver) {
-            // Simulate clicking on this contact
+            // Simulate clicking on this contact - this will load chat history etc.
             el.click();
             foundContact = true;
-            let detectionType = "";
-            if (data.detection_method === "ai") {
-              detectionType = "AI detected";
-            } else if (data.detection_method === "pattern") {
-              detectionType = "Pattern detected";
-            }
-            showSystemMessage(`${detectionType} and sending to: ${data.detected_receiver}`);
           }
         });
         
         if (!foundContact) {
-          showSystemMessage(`Contact '${data.detected_receiver}' not found in your contacts`);
+          showSystemMessage(`Contact '${data.detected_receiver}' not found in your contacts`, true);
           return;
         }
       }
       
-      // Determine if this is a relay message (checking if AI reformatted it)
-      const isRelayMessage = data.response && 
-                           data.response.trim() !== "" && 
-                           (data.response.includes("wants to know") || 
-                            data.response.includes("wanted to") ||
-                            data.response.includes("asked") ||
-                            data.response.toLowerCase().includes("hey,") ||
-                            data.response.toLowerCase().startsWith("hey"));
+      // Send message with the appropriate content
+      const messageToSend = data.response && data.response.trim() !== "" 
+                          ? data.response 
+                          : data.transcript;
+                          
+      // Send the message
+      socket.emit("send_message", {
+        sender: username,
+        receiver: finalReceiver,
+        message: messageToSend,
+        is_voice_message: true
+      });
       
-      // Always use the AI response if available, regardless of whether a user is selected
-      if (data.response && data.response.trim() !== "") {
-        // Send the AI-processed message to the recipient
-        socket.emit("send_message", {
-          sender: username,
-          receiver: finalReceiver,
-          message: data.response,
-          is_voice_message: true
-        });
-      } else {
-        // Fallback to original transcript only if no AI response is available
-        socket.emit("send_message", {
-          sender: username,
-          receiver: finalReceiver,
-          message: data.transcript,
-          is_voice_message: true
-        });
-      }
-      
-      // Reload chat history to show the sent message
-      setTimeout(() => loadChatHistory(finalReceiver), 300);
+      // Don't display the message locally, as it will come back through the socket
+      // The server will send it back to us and the receive_message handler will display it
       
     } catch (error) {
-      messagesContainer.removeChild(loadingMsg);
-      showSystemMessage("Error: " + error.message);
+      if (loadingMsg.parentNode) {
+        messagesContainer.removeChild(loadingMsg);
+      }
+      showSystemMessage("Error: " + error.message, true);
       console.error("Error processing audio:", error);
     }
   }
@@ -597,4 +647,75 @@ document.addEventListener("DOMContentLoaded", () => {
     showSystemMessage("Reconnected to server");
     socket.emit("join", { username });
   });
+  
+  // Function to handle voice recording
+  function handleVoiceRecording() {
+    if (!aiRecording) {
+      // Start recording - no need to check for currentReceiver anymore
+      aiButton.classList.add("recording");
+      aiButton.querySelector("span").textContent = "Recording...";
+      
+      // Show listening indicator and animate waveform
+      if (listeningIndicator) {
+        listeningIndicator.style.display = "flex";
+      }
+      
+      if (waveform) {
+        waveform.classList.add("active");
+      }
+      
+      // If no contact is selected, make sure empty state is visible
+      if (!currentReceiver && emptyStateContainer) {
+        emptyStateContainer.style.display = "flex";
+      }
+      
+      navigator.mediaDevices.getUserMedia({ audio: true })
+      .then((stream) => {
+        aiMediaRecorder = new MediaRecorder(stream);
+        aiMediaRecorder.start();
+        aiRecording = true;
+        aiAudioChunks = [];
+        
+        aiMediaRecorder.addEventListener("dataavailable", (event) => {
+          aiAudioChunks.push(event.data);
+        });
+        
+        aiMediaRecorder.addEventListener("stop", () => {
+          aiRecording = false;
+          aiButton.classList.remove("recording");
+          aiButton.querySelector("span").textContent = "Voice Message";
+          
+          // Hide listening indicator and stop waveform animation
+          if (listeningIndicator) {
+            listeningIndicator.style.display = "none";
+          }
+          
+          if (waveform) {
+            waveform.classList.remove("active");
+          }
+          
+          // Create a Blob from recorded chunks
+          const audioBlob = new Blob(aiAudioChunks, { type: "audio/webm" });
+          processAudio(audioBlob);
+        });
+      })
+      .catch(err => {
+        aiButton.classList.remove("recording");
+        aiButton.querySelector("span").textContent = "Voice Message";
+        showSystemMessage("Microphone access denied");
+        
+        // Hide listening indicator and stop waveform animation
+        if (listeningIndicator) {
+          listeningIndicator.style.display = "none";
+        }
+        
+        if (waveform) {
+          waveform.classList.remove("active");
+        }
+      });
+    } else if (aiMediaRecorder && aiMediaRecorder.state !== "inactive") {
+      // Stop recording
+      aiMediaRecorder.stop();
+    }
+  }
 });

@@ -62,11 +62,56 @@
                 </select>
               </div>
             </div>
+            <div class="settings-section">
+              <h3>Account</h3>
+              <div class="settings-option">
+                <button id="logoutButton" class="secondary-button" style="width: 100%;">Logout</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
       
-      <div id="messages" class="messages"></div>
+      <div id="messages" class="messages">
+        <!-- Empty state with waveform visualization and listening indicator -->
+        <div id="emptyStateContainer" class="empty-state-container">
+          <div class="waveform-container">
+            <div id="waveform" class="waveform">
+              <div class="waveform-bar"></div>
+              <div class="waveform-bar"></div>
+              <div class="waveform-bar"></div>
+              <div class="waveform-bar"></div>
+              <div class="waveform-bar"></div>
+              <div class="waveform-bar"></div>
+              <div class="waveform-bar"></div>
+              <div class="waveform-bar"></div>
+              <div class="waveform-bar"></div>
+              <div class="waveform-bar"></div>
+              <div class="waveform-bar"></div>
+              <div class="waveform-bar"></div>
+            </div>
+          </div>
+          
+          <h3 class="empty-state-title">Start a conversation</h3>
+          <p class="empty-state-text">Select a contact or use your voice to send a message</p>
+          
+          <div id="listeningIndicator" class="listening-indicator" style="display: none;">
+            <div class="listening-icon">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="22"></line>
+              </svg>
+            </div>
+            <span>Listening</span>
+            <div class="listening-animation">
+              <div class="listening-dot"></div>
+              <div class="listening-dot"></div>
+              <div class="listening-dot"></div>
+            </div>
+          </div>
+        </div>
+      </div>
       
       <div class="input-container">
         <input type="text" id="messageInput" placeholder="Type a message...">

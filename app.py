@@ -35,7 +35,11 @@ database = PineconeDatabase()
 
 @app.route("/")
 def index():
-    return redirect("/chat")
+    return redirect("/login")
+
+@app.route("/login")
+def login():
+    return render_template("login.html")
 
 @app.route("/chat")
 def chat():
@@ -151,6 +155,10 @@ def handle_send_message(data):
         # Emit the message to the receiver's socket (if connected)
         if receiver in users:
             emit("receive_message", payload, room=users[receiver])
+            
+        # Also emit the message back to the sender so they can see their own messages
+        if sender in users:
+            emit("receive_message", payload, room=users[sender])
             
         # Store conversation context in Pinecone
         # Create a unique conversation ID using sorted usernames to ensure consistency
