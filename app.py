@@ -10,7 +10,7 @@ from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 from database_schema import db, init_db, User, Message
 from pinecone_database import PineconeDatabase, store_conversation_context, update_conversation_context
-from openai_api import transcribe_audio as openai_transcribe_audio, process_message, detect_contact_from_transcript
+from openai_api import transcribe_audio as openai_transcribe_audio, process_message, detect_contact_from_transcript, conversational_interaction, update_conversation_recipient, reset_conversation
 from sqlalchemy import func
 
 load_dotenv()  # Load environment variables
@@ -214,8 +214,11 @@ def handle_transcription():
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
     
+    # Check if this is continuing a conversation or starting a new one
+    is_continuing = request.form.get('is_continuing', 'false').lower() == 'true'
     use_name_detection = request.form.get('use_name_detection', 'false').lower() == 'true'
-    logging.info(f"Transcription requested by {username}, use_name_detection: {use_name_detection}")
+    
+    logging.info(f"Transcription requested by {username}, use_name_detection: {use_name_detection}, is_continuing: {is_continuing}")
     
     # Create a temporary file to save the uploaded audio
     temp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], f"{username}_{time.time()}.wav")
@@ -231,12 +234,21 @@ def handle_transcription():
         detected_receiver = None
         detection_method = "none"
         
-        # Use the selected method for detecting the recipient
-        if use_name_detection:
-            # Get all available contacts for this user from the database
-            all_users = User.query.all()
-            available_contacts = [user.username for user in all_users if user.username != username]
-            
+        # Get all available contacts for this user
+        all_users = User.query.all()
+        available_contacts = [user.username for user in all_users if user.username != username]
+        
+        # Check if we already have a detected recipient from a previous interaction
+        if is_continuing:
+            # Get the previously detected recipient from the conversation state
+            from openai_api import user_conversations
+            if username in user_conversations and user_conversations[username].get("detected_recipient"):
+                detected_receiver = user_conversations[username]["detected_recipient"]
+                detection_method = "previous"
+                logging.info(f"Using previously detected contact: {detected_receiver}")
+        
+        # Try to detect contact if we don't have one yet or if explicitly requested
+        if (not detected_receiver and use_name_detection) or not is_continuing:
             # Try to detect the contact using OpenAI
             try:
                 ai_detected_contact = detect_contact_from_transcript(
@@ -249,12 +261,16 @@ def handle_transcription():
                     detected_receiver = ai_detected_contact
                     detection_method = "ai"
                     logging.info(f"OpenAI detected contact: {detected_receiver}")
+                    # Store the detected recipient in the conversation state
+                    update_conversation_recipient(username, detected_receiver)
                 else:
                     # Fallback to pattern-based detection
                     detected_receiver = detect_recipient_from_transcript(transcript, available_contacts)
                     if detected_receiver:
                         detection_method = "pattern"
                         logging.info(f"Pattern-based detection found: {detected_receiver}")
+                        # Store the detected recipient in the conversation state
+                        update_conversation_recipient(username, detected_receiver)
             except Exception as e:
                 logging.error(f"Error in contact detection: {str(e)}")
                 # Fallback to pattern-based detection
@@ -262,24 +278,60 @@ def handle_transcription():
                 if detected_receiver:
                     detection_method = "pattern"
                     logging.info(f"Fallback pattern-based detection found: {detected_receiver}")
+                    # Store the detected recipient in the conversation state
+                    update_conversation_recipient(username, detected_receiver)
         
-        # Process the transcript with OpenAI
-        response = process_message(
-            transcript, 
-            username, 
-            detected_receiver if detected_receiver else None
-        )
+        # Always log the detected receiver status
+        logging.info(f"Final detected receiver: {detected_receiver} (method: {detection_method})")
+        
+        # Process the transcript with conversational AI - pass available contacts
+        convo_response = conversational_interaction(username, transcript, available_contacts=available_contacts)
         
         # Delete the temporary file
         os.remove(temp_filepath)
         
-        # Return the result
-        return jsonify({
+        # Return the result - different response based on whether the conversation is ready
+        if convo_response["ready_to_send"]:
+            # If ready to send, provide the final message and reset conversation
+            response_message = "Your message is ready to send."
+            is_final = True
+            
+            # Use the stored recipient from the conversation if available
+            if convo_response["detected_recipient"] and not detected_receiver:
+                detected_receiver = convo_response["detected_recipient"]
+                logging.info(f"Using conversation recipient: {detected_receiver}")
+            
+            # If we still don't have a recipient, we need to alert the user
+            if not detected_receiver:
+                logging.warning("No recipient detected for message that's ready to send")
+            
+            # Reset the conversation for this user
+            reset_conversation(username)
+        else:
+            # If not ready, send a follow-up question
+            response_message = convo_response["response"]
+            is_final = False
+            
+            # Always prefer the detected recipient from the conversation response
+            if convo_response["detected_recipient"]:
+                detected_receiver = convo_response["detected_recipient"]
+                logging.info(f"Updated recipient from conversation: {detected_receiver}")
+        
+        # Construct and return the response
+        response_data = {
             "transcript": transcript,
-            "response": response,
+            "response": response_message,
             "detected_receiver": detected_receiver,
-            "detection_method": detection_method
-        })
+            "detection_method": detection_method,
+            "is_final": is_final
+        }
+        
+        # Add final_message to the response data if available
+        if is_final and convo_response["final_message"]:
+            response_data["final_message"] = convo_response["final_message"]
+        
+        logging.info(f"Returning transcription response: {response_data}")
+        return jsonify(response_data)
     
     except Exception as e:
         logging.error(f"Error in transcription: {str(e)}")
