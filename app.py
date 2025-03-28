@@ -396,6 +396,25 @@ def detect_recipient_from_transcript(transcript, available_contacts):
     
     return None
 
+@app.route('/get_tts', methods=['POST'])
+def get_tts():
+    """Convert text to speech using Google Cloud TTS and return as base64"""
+    try:
+        data = request.json
+        text = data.get('text')
+        voice_gender = data.get('voice_gender', 'FEMALE')
+        
+        if not text:
+            return jsonify({"error": "No text provided"}), 400
+            
+        # Use the Google Cloud TTS function to convert text to speech
+        audio_base64 = text_to_speech(text, voice_gender=voice_gender)
+        
+        return jsonify({"audio": audio_base64})
+    except Exception as e:
+        logging.error(f"Error in TTS conversion: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 @app.errorhandler(500)
 def internal_error(error):
     app.logger.error("500 error: %s", error)

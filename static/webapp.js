@@ -38,6 +38,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // Store unread messages count for each user
   const unreadCounts = {};
   
+  // Notifications array to store unread messages
+  let notifications = [];
+  
   // Request notification permission on page load
   requestNotificationPermission();
   
@@ -277,6 +280,11 @@ document.addEventListener("DOMContentLoaded", () => {
     
     // Listen for messages
     socket.on("receive_message", (data) => {
+      console.log("Received message:", data);
+      
+      // Get the current username
+      const currentUsername = getUsername();
+      
       // Create a message object similar to the one from the database
       const messageObj = {
         sender: data.sender,
@@ -286,32 +294,33 @@ document.addEventListener("DOMContentLoaded", () => {
         is_voice_message: data.is_voice_message || false,
         timestamp: new Date().toISOString()
       };
-
-      // Case 1: Message from another user to the current user
-      if (data.receiver === username && data.sender !== username) {
-        // Show notification for new message
-        showNotification(data.sender, data.message);
+      
+      // Only add to notifications if we're the receiver and not the sender
+      if (data.receiver === currentUsername && data.sender !== currentUsername) {
+        addNotification(data.sender, data.message, new Date().toISOString());
         
-        // Update unread count if not viewing this conversation
-        if (currentReceiver !== data.sender || document.visibilityState !== "visible") {
-          unreadCounts[data.sender] = (unreadCounts[data.sender] || 0) + 1;
-          updateUnreadBadges();
-        }
-        
-        // If message history is visible and this is the current contact, display the message
-        if (messagesContainer.style.display !== "none" && window.selectedUser === data.sender) {
-          displayMessage(messageObj);
-        }
+        // Update unread count
+        unreadCounts[data.sender] = (unreadCounts[data.sender] || 0) + 1;
       }
       
-      // Case 2: Message sent by current user to someone else
-      else if (data.sender === username) {
-        // If message history is visible and this is the current contact, display the message
-        if (messagesContainer.style.display !== "none" && window.selectedUser === data.receiver) {
-          displayMessage(messageObj);
+      // Check if we're already in a chat with this user
+      const currentChat = document.getElementById('chatRecipient').innerText;
+      if ((currentChat === data.sender || currentChat === data.receiver) && 
+          messagesContainer.style.display !== "none") {
+        displayMessage(messageObj);
+        
+        // If we're looking at the messages, mark it as read
+        if (data.receiver === currentUsername && data.sender !== currentUsername) {
+          markAsRead(data.sender);
         }
+      } else {
+        // Not in the current chat, update unread count
+        updateUnreadBadges();
       }
     });
+    
+    // Initialize notifications
+    updateNotificationsUI();
   };
   
   // Start the app initialization
@@ -1043,5 +1052,180 @@ document.addEventListener("DOMContentLoaded", () => {
   function clearSystemMessages() {
     // Just update the voice status to default
     updateVoiceStatus("Press the microphone button to start recording");
+  }
+
+  // Function to add a notification
+  function addNotification(sender, message, timestamp) {
+    const notification = {
+      id: Date.now(),
+      sender,
+      message,
+      timestamp: timestamp || new Date().toISOString(),
+      read: false
+    };
+    
+    notifications.unshift(notification);
+    updateNotificationsUI();
+    
+    // Show browser notification if we have permission
+    if (Notification.permission === "granted") {
+      showNotification(sender, message);
+    }
+  }
+
+  // Function to update the notifications UI
+  function updateNotificationsUI() {
+    const notificationsContainer = document.getElementById('notifications');
+    
+    if (notifications.length === 0) {
+      notificationsContainer.innerHTML = '<div class="empty-notifications">No new notifications</div>';
+      return;
+    }
+    
+    notificationsContainer.innerHTML = '';
+    
+    notifications.forEach(notification => {
+      const notificationElement = document.createElement('div');
+      notificationElement.className = `notification-item ${notification.read ? '' : 'unread'}`;
+      notificationElement.dataset.id = notification.id;
+      
+      // Format timestamp
+      const timestamp = new Date(notification.timestamp);
+      const timeString = timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      
+      notificationElement.innerHTML = `
+        <div class="notification-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+          </svg>
+        </div>
+        <div class="notification-content">
+          <div class="notification-title">New message from ${notification.sender}</div>
+          <div class="notification-message">${notification.message}</div>
+          <div class="notification-time">${timeString}</div>
+        </div>
+      `;
+      
+      // Add click event to read the notification
+      notificationElement.addEventListener('click', () => {
+        readNotificationAloud(notification);
+        markNotificationAsRead(notification.id);
+        // Navigate to the chat with this sender
+        const contactElement = document.querySelector(`.contact-item[data-username="${notification.sender}"]`);
+        if (contactElement) {
+          handleContactClick(contactElement);
+        }
+      });
+      
+      notificationsContainer.appendChild(notificationElement);
+    });
+  }
+
+  // Function to mark a notification as read
+  function markNotificationAsRead(notificationId) {
+    const index = notifications.findIndex(n => n.id == notificationId);
+    if (index !== -1) {
+      notifications[index].read = true;
+      updateNotificationsUI();
+    }
+  }
+
+  // Function to read a notification aloud
+  function readNotificationAloud(notification) {
+    // First announce the new message
+    const announcement = `Hey, received a new message from ${notification.sender}`;
+    
+    // Get the configured voice gender
+    const voiceGender = document.getElementById('ttsVoice')?.value || 'FEMALE';
+    
+    // Create a function to read the actual message after the announcement
+    const readMessage = () => {
+      speakText(notification.message, voiceGender);
+    };
+    
+    // First speak the announcement, then the message
+    speakText(announcement, voiceGender, readMessage);
+  }
+
+  // Function to use TTS to speak text
+  function speakText(text, voiceGender, onEndCallback) {
+    // Create a unique ID for this audio element
+    const audioId = 'tts-audio-' + Date.now();
+    
+    // Show speaking indicator
+    showSystemMessage(`Speaking: ${text}`);
+    
+    // Create an audio element
+    const audioElement = document.createElement('audio');
+    audioElement.id = audioId;
+    
+    // If we have an onEnd callback, set it up
+    if (onEndCallback) {
+      audioElement.onended = onEndCallback;
+    }
+    
+    // Make a simple fetch request to get TTS audio
+    fetch('/get_tts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        text: text,
+        voice_gender: voiceGender
+      }),
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.audio) {
+        // Create an audio source with the base64 audio
+        audioElement.src = 'data:audio/mp3;base64,' + data.audio;
+        document.body.appendChild(audioElement);
+        
+        // Play the audio
+        audioElement.play().catch(error => {
+          console.error('Error playing audio:', error);
+          showSystemMessage('Error playing audio');
+          
+          // Still call the callback if there's an error
+          if (onEndCallback) onEndCallback();
+        });
+        
+        // Remove the audio element when done
+        audioElement.onended = function() {
+          document.body.removeChild(audioElement);
+          if (onEndCallback) onEndCallback();
+        };
+      } else {
+        console.error('Error getting TTS:', data.error);
+        showSystemMessage('Error getting TTS');
+        
+        // Still call the callback if there's an error
+        if (onEndCallback) onEndCallback();
+      }
+    })
+    .catch(error => {
+      console.error('Error:', error);
+      showSystemMessage('Error getting TTS');
+      
+      // Still call the callback if there's an error
+      if (onEndCallback) onEndCallback();
+    });
+  }
+
+  // Function to mark messages from a user as read
+  function markAsRead(username) {
+    // Reset unread count for this user
+    unreadCounts[username] = 0;
+    updateUnreadBadges();
+    
+    // Mark all notifications from this user as read
+    notifications.forEach(notification => {
+      if (notification.sender === username && !notification.read) {
+        notification.read = true;
+      }
+    });
+    updateNotificationsUI();
   }
 });
