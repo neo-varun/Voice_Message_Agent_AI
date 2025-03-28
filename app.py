@@ -12,6 +12,7 @@ from database_schema import db, init_db, User, Message
 from pinecone_database import PineconeDatabase, store_conversation_context, update_conversation_context
 from openai_api import transcribe_audio as openai_transcribe_audio, process_message, detect_contact_from_transcript, conversational_interaction, update_conversation_recipient, reset_conversation
 from sqlalchemy import func
+from tts_google_cloud import text_to_speech
 
 load_dotenv()  # Load environment variables
 
@@ -290,9 +291,11 @@ def handle_transcription():
         # Delete the temporary file
         os.remove(temp_filepath)
         
+        # Convert the response to speech using Google TTS
+        voice_gender = request.form.get('voice_gender', 'FEMALE')
+        
         # Return the result - different response based on whether the conversation is ready
         if convo_response["ready_to_send"]:
-            # If ready to send, provide the final message and reset conversation
             response_message = "Your message is ready to send."
             is_final = True
             
@@ -305,12 +308,18 @@ def handle_transcription():
             if not detected_receiver:
                 logging.warning("No recipient detected for message that's ready to send")
             
+            # Generate speech for the final state
+            audio_response = text_to_speech(response_message, voice_gender=voice_gender)
+            
             # Reset the conversation for this user
             reset_conversation(username)
         else:
             # If not ready, send a follow-up question
             response_message = convo_response["response"]
             is_final = False
+            
+            # Generate speech for the response
+            audio_response = text_to_speech(response_message, voice_gender=voice_gender)
             
             # Always prefer the detected recipient from the conversation response
             if convo_response["detected_recipient"]:
@@ -321,6 +330,7 @@ def handle_transcription():
         response_data = {
             "transcript": transcript,
             "response": response_message,
+            "audio_response": audio_response,
             "detected_receiver": detected_receiver,
             "detection_method": detection_method,
             "is_final": is_final
@@ -330,7 +340,7 @@ def handle_transcription():
         if is_final and convo_response["final_message"]:
             response_data["final_message"] = convo_response["final_message"]
         
-        logging.info(f"Returning transcription response: {response_data}")
+        logging.info(f"Returning transcription response with audio")
         return jsonify(response_data)
     
     except Exception as e:

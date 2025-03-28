@@ -6,6 +6,68 @@
   <title>Voice Chat AI</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='global.css') }}">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* Additional styles for voice-focused UI */
+    .voice-interaction-area {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      flex: 1;
+      padding: 24px;
+      background-color: var(--background);
+      overflow-y: auto;
+      min-height: 100%;
+    }
+    
+    .voice-message-preview {
+      width: 100%;
+      max-width: 600px;
+      background-color: white;
+      border-radius: var(--radius-md);
+      padding: 24px;
+      box-shadow: var(--shadow-md);
+      margin-top: 24px;
+      display: none;
+    }
+    
+    .voice-message-preview h3 {
+      font-size: 18px;
+      margin-bottom: 16px;
+      color: var(--primary);
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    
+    .voice-message-content {
+      font-size: 15px;
+      line-height: 1.6;
+      color: var(--text-primary);
+      white-space: pre-wrap;
+    }
+    
+    .voice-controls {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-top: 24px;
+      width: 100%;
+      max-width: 600px;
+    }
+    
+    .voice-status {
+      font-size: 16px;
+      margin-top: 16px;
+      color: var(--text-secondary);
+      text-align: center;
+      min-height: 24px;
+    }
+    
+    /* Make waveform container smaller when chat is visible */
+    .messages:not([style*="display: none"]) ~ .waveform-container {
+      margin-bottom: 0;
+    }
+  </style>
 </head>
 <body>
   <div class="chat-container">
@@ -26,14 +88,14 @@
           </svg>
           <span>Voice Message</span>
         </button>
-        <div class="ai-hint">Sends to selected contact, or mention a name (e.g., "Tell John...")</div>
+        <div class="ai-hint">Mention a name to send a message (e.g., "Tell John...")</div>
       </div>
     </div>
     
-    <!-- Main Chat Area -->
+    <!-- Main Voice Interaction Area -->
     <div class="chat-main">
       <div class="chat-header">
-        <h2 id="chatRecipient">Select a contact to start chatting</h2>
+        <h2 id="chatRecipient">Voice Messaging</h2>
         
         <!-- Settings Dropdown -->
         <div class="settings-dropdown">
@@ -72,55 +134,73 @@
         </div>
       </div>
       
-      <div id="messages" class="messages">
-        <!-- Empty state with waveform visualization and listening indicator -->
-        <div id="emptyStateContainer" class="empty-state-container">
-          <div class="waveform-container">
-            <div id="waveform" class="waveform">
-              <div class="waveform-bar"></div>
-              <div class="waveform-bar"></div>
-              <div class="waveform-bar"></div>
-              <div class="waveform-bar"></div>
-              <div class="waveform-bar"></div>
-              <div class="waveform-bar"></div>
-              <div class="waveform-bar"></div>
-              <div class="waveform-bar"></div>
-              <div class="waveform-bar"></div>
-              <div class="waveform-bar"></div>
-              <div class="waveform-bar"></div>
-              <div class="waveform-bar"></div>
-            </div>
-          </div>
-          
-          <h3 class="empty-state-title">Start a conversation</h3>
-          <p class="empty-state-text">Select a contact or use your voice to send a message</p>
-          
-          <div id="listeningIndicator" class="listening-indicator" style="display: none;">
-            <div class="listening-icon">
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                <line x1="12" y1="19" x2="12" y2="22"></line>
-              </svg>
-            </div>
-            <span>Listening</span>
-            <div class="listening-animation">
-              <div class="listening-dot"></div>
-              <div class="listening-dot"></div>
-              <div class="listening-dot"></div>
-            </div>
+      <!-- Voice Interaction Area -->
+      <div class="voice-interaction-area">
+        <!-- Waveform visualization for voice -->
+        <div class="waveform-container">
+          <div id="waveform" class="waveform">
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
           </div>
         </div>
-      </div>
-      
-      <div class="input-container">
-        <input type="text" id="messageInput" placeholder="Type a message...">
-        <button id="sendButton">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="22" y1="2" x2="11" y2="13"></line>
-            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-          </svg>
-        </button>
+        
+        <!-- Listening indicator -->
+        <div id="listeningIndicator" class="listening-indicator" style="display: none;">
+          <div class="listening-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="22"></line>
+            </svg>
+          </div>
+          <span>Listening</span>
+          <div class="listening-animation">
+            <div class="listening-dot"></div>
+            <div class="listening-dot"></div>
+            <div class="listening-dot"></div>
+          </div>
+        </div>
+        
+        <!-- View history button - initially hidden until contact selected -->
+        <div class="voice-controls" style="margin-bottom: 15px;">
+          <button id="viewHistoryButton" class="secondary-button" style="display: none; padding: 10px 16px;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px; vertical-align: text-bottom;">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            View Message History
+          </button>
+        </div>
+        
+        <!-- Voice status text -->
+        <div class="voice-status" id="voiceStatus">
+          Press the microphone button to start recording
+        </div>
+        
+        <!-- Messages container (now visible when history is viewed) -->
+        <div id="messages" class="messages" style="display: none; margin-top: 15px; width: 100%;"></div>
+        
+        <!-- Message preview for final messages -->
+        <div class="voice-message-preview" id="messagePreview">
+          <h3>Message Preview</h3>
+          <div class="voice-message-content" id="previewContent"></div>
+          
+          <div class="voice-controls">
+            <button id="sendPreviewButton" class="primary-button" style="width: 100%; margin-top: 20px;">
+              Send Message
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </div>

@@ -153,15 +153,64 @@ document.addEventListener("DOMContentLoaded", () => {
     messagesContainer = document.getElementById("messages");
     contactsContainer = document.getElementById("contacts");
     aiButton = document.getElementById("aiButton");
-    sendButton = document.getElementById("sendButton");
-    messageInput = document.getElementById("messageInput");
     waveform = document.getElementById("waveform");
     listeningIndicator = document.getElementById("listeningIndicator");
-    emptyStateContainer = document.getElementById("emptyStateContainer");
     
-    // Initialize empty state with waveform visualization
-    if (emptyStateContainer) {
-      emptyStateContainer.style.display = "flex";
+    // Voice UI elements
+    const voiceStatus = document.getElementById("voiceStatus");
+    const messagePreview = document.getElementById("messagePreview");
+    const previewContent = document.getElementById("previewContent");
+    const sendPreviewButton = document.getElementById("sendPreviewButton");
+    const viewHistoryButton = document.getElementById("viewHistoryButton");
+    
+    // Initialize the send preview button
+    if (sendPreviewButton) {
+      sendPreviewButton.addEventListener("click", sendFinalMessage);
+    }
+    
+    // Initialize the view history button
+    if (viewHistoryButton) {
+      viewHistoryButton.addEventListener("click", function() {
+        // Toggle message history display
+        if (messagesContainer.style.display === "none") {
+          // Show message history
+          messagesContainer.style.display = "flex";
+          viewHistoryButton.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px; vertical-align: text-bottom;">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            Hide Message History
+          `;
+          
+          // Make the waveform container smaller
+          if (waveform && waveform.parentElement) {
+            waveform.parentElement.style.marginBottom = "0";
+            waveform.parentElement.style.marginTop = "10px";
+          }
+          
+          // Load the chat history for the selected user
+          if (window.selectedUser) {
+            loadChatHistory(window.selectedUser);
+          }
+        } else {
+          // Hide message history
+          messagesContainer.style.display = "none";
+          viewHistoryButton.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px; vertical-align: text-bottom;">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            View Message History
+          `;
+          
+          // Restore the waveform container
+          if (waveform && waveform.parentElement) {
+            waveform.parentElement.style.marginBottom = "";
+            waveform.parentElement.style.marginTop = "";
+          }
+        }
+      });
     }
   
     // Settings elements
@@ -169,32 +218,26 @@ document.addEventListener("DOMContentLoaded", () => {
     settingsMenu = document.getElementById("settingsMenu");
     sttModelSelect = document.getElementById("sttModel");
     ttsVoiceSelect = document.getElementById("ttsVoice");
-  
-  // Toggle settings menu
-  settingsButton.addEventListener("click", (e) => {
-    e.stopPropagation();
-    settingsMenu.classList.toggle("active");
-  });
-  
-  // Close settings when clicking elsewhere
-  document.addEventListener("click", (e) => {
-    if (
-      settingsMenu.classList.contains("active") && 
-      !settingsMenu.contains(e.target) && 
-      e.target !== settingsButton
-    ) {
-      settingsMenu.classList.remove("active");
-    }
-  });
-  
-  // Initialize settings
-  initSettings();
-  
-    // Set up event handlers
-    sendButton.addEventListener("click", sendTextMessage);
-    messageInput.addEventListener("keypress", (e) => { 
-      if (e.key === "Enter") sendTextMessage();
+    
+    // Toggle settings menu
+    settingsButton.addEventListener("click", (e) => {
+      e.stopPropagation();
+      settingsMenu.classList.toggle("active");
     });
+    
+    // Close settings when clicking elsewhere
+    document.addEventListener("click", (e) => {
+      if (
+        settingsMenu.classList.contains("active") && 
+        !settingsMenu.contains(e.target) && 
+        e.target !== settingsButton
+      ) {
+        settingsMenu.classList.remove("active");
+      }
+    });
+    
+    // Initialize settings
+    initSettings();
     
     // Set up voice message recording
     aiButton.addEventListener("click", handleVoiceRecording);
@@ -221,16 +264,16 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!socket.connected) {
         socket.connect();
       }
-  socket.emit("join", { username });
+      socket.emit("join", { username });
     }
   
-  // Initial load of all users when page loads
-  fetchAllUsers();
-  
-  // Update user list when status changes
-  socket.on("user_status_update", (data) => {
-    updateUserList(data.all_users);
-  });
+    // Initial load of all users when page loads
+    fetchAllUsers();
+    
+    // Update user list when status changes
+    socket.on("user_status_update", (data) => {
+      updateUserList(data.all_users);
+    });
     
     // Listen for messages
     socket.on("receive_message", (data) => {
@@ -255,15 +298,18 @@ document.addEventListener("DOMContentLoaded", () => {
           updateUnreadBadges();
         }
         
-        // Only display the message if the sender is the current contact
-        if (currentReceiver === data.sender) {
+        // If message history is visible and this is the current contact, display the message
+        if (messagesContainer.style.display !== "none" && window.selectedUser === data.sender) {
           displayMessage(messageObj);
         }
       }
+      
       // Case 2: Message sent by current user to someone else
-      else if (data.sender === username && data.receiver === currentReceiver) {
-        // Display message from current user
-        displayMessage(messageObj);
+      else if (data.sender === username) {
+        // If message history is visible and this is the current contact, display the message
+        if (messagesContainer.style.display !== "none" && window.selectedUser === data.receiver) {
+          displayMessage(messageObj);
+        }
       }
     });
   };
@@ -376,27 +422,18 @@ document.addEventListener("DOMContentLoaded", () => {
   
   // Load chat history
   function loadChatHistory(selectedUser) {
-    // Hide the empty state container when loading chat history
-    if (emptyStateContainer) {
-      emptyStateContainer.style.display = "none";
-    }
+    if (!messagesContainer) return;
     
-    // Clear any existing content first
+    // Clear existing messages
     messagesContainer.innerHTML = "";
     
-    // Remove any existing loading messages first
-    const existingLoadingMsgs = messagesContainer.querySelectorAll(".loading-message");
-    existingLoadingMsgs.forEach(msg => {
-      if (msg.parentNode) {
-        messagesContainer.removeChild(msg);
-      }
-    });
-    
+    // Add loading indicator
     const loadingMsg = document.createElement("div");
     loadingMsg.textContent = "Loading messages";
-    loadingMsg.classList.add("loading-message");
+    loadingMsg.classList.add("message-bubble", "system");
     messagesContainer.appendChild(loadingMsg);
     
+    // Fetch message history
     fetch("/get_chat_history", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -408,56 +445,32 @@ document.addEventListener("DOMContentLoaded", () => {
     })
     .then(messages => {
       // Remove loading message
-      if (loadingMsg.parentNode) {
-      messagesContainer.removeChild(loadingMsg);
-      }
-      
-      // Reset all messages before displaying history
       messagesContainer.innerHTML = "";
       
       if (messages.length === 0) {
+        // Display a "no messages" indicator
         const noMsg = document.createElement("div");
         noMsg.textContent = "No messages yet";
         noMsg.classList.add("message-bubble", "system");
         messagesContainer.appendChild(noMsg);
-        
-        // Ensure even empty chat is scrolled to bottom
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        
-        setTimeout(() => {
-          if (noMsg.parentNode) {
-            messagesContainer.removeChild(noMsg);
-          }
-        }, 3000);
       } else {
-        // Display all messages at once without delay
+        // Display each message
         messages.forEach(message => {
           displayMessage(message);
         });
-        
-        // Scroll to bottom once
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
       }
+      
+      // Scroll to bottom
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
     })
     .catch(error => {
-      // Clean up the loading message
-      if (loadingMsg.parentNode) {
-        messagesContainer.removeChild(loadingMsg);
-      }
+      // Show error message
+      messagesContainer.innerHTML = "";
       
       const errMsg = document.createElement("div");
-      errMsg.textContent = "Could not load messages";
+      errMsg.textContent = "Error loading messages";
       errMsg.classList.add("message-bubble", "system");
       messagesContainer.appendChild(errMsg);
-      
-      // Ensure error message is visible
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
-      
-      setTimeout(() => {
-        if (errMsg.parentNode) {
-          messagesContainer.removeChild(errMsg);
-        }
-      }, 3000);
     });
   }
   
@@ -478,19 +491,42 @@ document.addEventListener("DOMContentLoaded", () => {
   
   // Helper to display a message with appropriate styling
   function displayMessage(message) {
-    const type = (message.sender === username) ? "sender" : "receiver";
+    if (!messagesContainer) return;
+    
+    const type = (message.sender === username) ? "outgoing" : "incoming";
     const msgDiv = document.createElement("div");
     
-    // All messages use standard styling
+    // Add appropriate classes based on message type
     msgDiv.classList.add("message-bubble", type);
     
-    // Just display the message without animation, regardless of type
-    msgDiv.textContent = message.content;
+    // Create container for message content
+    const contentDiv = document.createElement("div");
+    contentDiv.className = "message-content";
+    contentDiv.textContent = message.content;
+    
+    // Create timestamp element
+    const timestampDiv = document.createElement("div");
+    timestampDiv.className = "message-timestamp";
+    
+    // Format the timestamp
+    const msgDate = new Date(message.timestamp);
+    const formattedDate = msgDate.toLocaleString([], {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+    
+    timestampDiv.textContent = formattedDate;
+    
+    // Add content and timestamp to message
+    msgDiv.appendChild(contentDiv);
+    msgDiv.appendChild(timestampDiv);
     
     messagesContainer.appendChild(msgDiv);
     
-    // Ensure scroll to bottom is executed after the DOM has updated
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    // Scroll to bottom
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
     
     return msgDiv;
   }
@@ -574,12 +610,18 @@ document.addEventListener("DOMContentLoaded", () => {
             'X-Username': username
         };
 
-        // Add a flag indicating if this is continuing a conversation
+        // Add flags for continuing conversation
         formData.append('is_continuing', window.currentConversationState ? 'true' : 'false');
         formData.append('use_name_detection', (!window.selectedUser || window.currentConversationState?.ready_to_send) ? 'true' : 'false');
+        
+        // Add voice gender preference
+        formData.append('voice_gender', localStorage.getItem('ttsVoice') || 'FEMALE');
 
-        // Show loading message
-        showSystemMessage("Processing your audio...");
+        // Update voice status
+        updateVoiceStatus("Processing your message...");
+        
+        // Hide message preview if visible
+        document.getElementById('messagePreview').style.display = 'none';
 
         // Send to server
         const response = await fetch('/transcribe', {
@@ -591,7 +633,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const data = await response.json();
 
         if (data.error) {
-            showSystemMessage(`Error: ${data.error}`);
+            updateVoiceStatus(`Error: ${data.error}`);
             return;
         }
 
@@ -608,47 +650,36 @@ document.addEventListener("DOMContentLoaded", () => {
         // Add transcript to conversation
         window.currentConversationState.transcript.push(data.transcript);
 
-        // Update the transcript and response
-        const messagesContainer = document.getElementById('messages');
+        // Update voice status with transcript
+        updateVoiceStatus(`You said: "${data.transcript}"`);
 
-        // Clear any temporary system messages first
-        document.querySelectorAll('.system-message.temporary').forEach(el => el.remove());
+        // Play the audio response if available
+        if (data.audio_response) {
+            // Convert base64 to audio and play it
+            const audio = new Audio(`data:audio/mp3;base64,${data.audio_response}`);
+            await audio.play();
+            
+            // Update voice status with the AI response after audio plays
+            updateVoiceStatus(data.response);
+        }
 
-        // Show transcript
-        const transcriptBubble = document.createElement('div');
-        transcriptBubble.className = 'message-bubble outgoing';
-        transcriptBubble.textContent = data.transcript;
-        messagesContainer.appendChild(transcriptBubble);
-
-        // Show detected recipient info if available
+        // Update recipient if detected
         if (data.detected_receiver && !window.currentConversationState.recipient) {
             window.currentConversationState.recipient = data.detected_receiver;
             
-            // Create a more prominent display for the detected recipient
-            const recipientInfo = document.createElement('div');
-            recipientInfo.className = 'message-bubble system';
-            recipientInfo.style.fontWeight = 'bold';
-            recipientInfo.style.backgroundColor = 'rgba(99, 102, 241, 0.2)';
-            recipientInfo.innerHTML = `Recipient detected: <span style="color: var(--primary-dark);">${data.detected_receiver}</span>`;
-            messagesContainer.appendChild(recipientInfo);
-            
-            // Also update the active contact in the sidebar
+            // Update the active contact in the sidebar
             const contactElements = document.querySelectorAll('.contact-item');
             contactElements.forEach(element => {
+                if (!element.querySelector('span:not(.status-indicator)')) return;
                 const contactName = element.querySelector('span:not(.status-indicator)').textContent;
                 if (contactName === data.detected_receiver) {
                     document.querySelectorAll('.contact-item.selected').forEach(el => el.classList.remove('selected'));
                     element.classList.add('selected');
                 }
             });
-        }
-
-        // Show AI response
-        if (data.response) {
-            const aiResponseBubble = document.createElement('div');
-            aiResponseBubble.className = 'message-bubble incoming';
-            aiResponseBubble.textContent = data.response;
-            messagesContainer.appendChild(aiResponseBubble);
+            
+            // Update the chat recipient header
+            document.getElementById('chatRecipient').textContent = `Message to: ${data.detected_receiver}`;
         }
 
         // Store the final message if provided
@@ -656,7 +687,7 @@ document.addEventListener("DOMContentLoaded", () => {
             window.currentConversationState.final_message = data.final_message;
         }
 
-        // If data.is_final is true and contains a sending indicator, handle it
+        // If conversation is complete, show the message preview
         if (data.is_final) {
             const finalMessage = data.final_message || data.transcript;
             
@@ -691,73 +722,49 @@ document.addEventListener("DOMContentLoaded", () => {
             window.currentConversationState.ready_to_send = true;
             
             // IMPORTANT: Always use the AI-generated final_message rather than the transcript
-            // for the final message to be sent
             if (data.final_message) {
                 window.currentConversationState.final_message = data.final_message;
             }
             
-            // Clear any existing system messages or previews
-            clearSystemMessages();
-            document.querySelectorAll(".message-bubble.preview, .primary-button").forEach(el => el.remove());
+            // Show the message preview in the new UI
+            const previewContent = document.getElementById('previewContent');
+            previewContent.textContent = window.currentConversationState.final_message || "No message to send";
             
-            // Create a preview of the final message - ALWAYS use the final_message property
-            const previewBubble = document.createElement("div");
-            previewBubble.className = "message-bubble preview";
-            previewBubble.style.backgroundColor = "#f0f0ff";
-            previewBubble.style.border = "2px solid #6366f1";
-            previewBubble.style.color = "#000";
-            previewBubble.style.margin = "10px 0";
-            previewBubble.style.padding = "15px";
+            // Update the preview header if we have a recipient
+            const messagePreview = document.getElementById('messagePreview');
+            const previewHeader = messagePreview.querySelector('h3');
             
-            // Log the final message to debug
-            console.log("Final message for preview:", window.currentConversationState.final_message);
+            if (window.currentConversationState.recipient) {
+                previewHeader.textContent = `Message to ${window.currentConversationState.recipient}`;
+            } else {
+                previewHeader.textContent = 'Message Preview';
+            }
             
-            // Create a simple direct display of the message without fancy structure
-            previewBubble.innerHTML = `
-                <div style="font-weight: bold; margin-bottom: 10px; color: #6366f1; border-bottom: 1px solid #6366f1; padding-bottom: 5px;">
-                    Preview of message to be sent:
-                </div>
-                <div style="white-space: pre-wrap; font-size: 15px; line-height: 1.5;">
-                    ${window.currentConversationState.final_message || "No message to send. Please try again."}
-                </div>
-            `;
+            // Show the preview
+            messagePreview.style.display = 'block';
             
-            // Add to messages container
-            messagesContainer.appendChild(previewBubble);
-            
-            // Then show instructions - ENGLISH ONLY
-            const instructionsDiv = document.createElement("div");
-            instructionsDiv.className = "message-bubble system";
-            instructionsDiv.style.marginTop = "10px";
-            instructionsDiv.textContent = "Your message is ready to send. Say 'send' or click the button below to confirm.";
-            messagesContainer.appendChild(instructionsDiv);
-            
-            // Add a confirmation button
-            const confirmButton = document.createElement("button");
-            confirmButton.className = "primary-button";
-            confirmButton.style.margin = "10px auto";
-            confirmButton.style.display = "block";
-            confirmButton.textContent = "Send Message";
-            confirmButton.onclick = sendFinalMessage;
-            messagesContainer.appendChild(confirmButton);
+            // Update voice status
+            updateVoiceStatus("Your message is ready to send. Press the Send button to confirm.");
         }
-
-        // Scroll to the bottom
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
     } catch (error) {
         console.error('Error processing audio:', error);
-        showSystemMessage(`Error: ${error.message || 'Failed to process audio'}`);
+        updateVoiceStatus(`Error: ${error.message || 'Failed to process audio'}`);
     }
 }
+  
+  // Update the voice status display
+  function updateVoiceStatus(message) {
+    const voiceStatus = document.getElementById('voiceStatus');
+    if (voiceStatus) {
+        voiceStatus.textContent = message;
+    }
+  }
   
   // Function to send the final message when user confirms
   function sendFinalMessage() {
     // Check if we have a message ready to send
     if (!window.currentConversationState || !window.currentConversationState.final_message) {
-        // Don't show this message if we have an existing preview displayed
-        if (!document.querySelector(".message-bubble.preview")) {
-            showSystemMessage("No message ready to send", true);
-        }
+        updateVoiceStatus("No message ready to send");
         return;
     }
     
@@ -766,7 +773,7 @@ document.addEventListener("DOMContentLoaded", () => {
     
     // Ensure we have a recipient
     if (!recipient) {
-        showSystemMessage("Please select a recipient first");
+        updateVoiceStatus("Please select a recipient first");
         return;
     }
     
@@ -784,25 +791,29 @@ document.addEventListener("DOMContentLoaded", () => {
     console.log("Sent message to:", recipient, "Content:", messageContent);
     
     // Update UI to show message sent
-    showSystemMessage(`Message sent to ${recipient}`, true);
+    updateVoiceStatus(`Message sent to ${recipient}`);
     
-    // Remove any confirmation buttons and preview elements
-    document.querySelectorAll(".primary-button, .message-bubble.preview, .message-bubble.recipient-info").forEach(el => {
-        el.remove();
-    });
+    // Hide the message preview
+    document.getElementById('messagePreview').style.display = 'none';
     
     // Reset conversation state
     window.currentConversationState = null;
+    
+    // Reset the chat recipient header
+    document.getElementById('chatRecipient').textContent = 'Voice Messaging';
     
     // If we weren't already in a chat with this contact, navigate to the chat
     if (window.selectedUser !== recipient) {
         // Find and click on the contact element
         const contactElements = document.querySelectorAll(".contact-item");
         contactElements.forEach(contactElement => {
+            if (!contactElement.querySelector("span:not(.status-indicator)")) return;
             const contactUsername = contactElement.querySelector("span:not(.status-indicator)").textContent;
             if (contactUsername === recipient) {
-                // Programmatically click on the contact
-                contactElement.click();
+                // Update selected contact
+                window.selectedUser = recipient;
+                document.querySelectorAll('.contact-item.selected').forEach(el => el.classList.remove('selected'));
+                contactElement.classList.add('selected');
             }
         });
     }
@@ -896,72 +907,70 @@ document.addEventListener("DOMContentLoaded", () => {
   // Function to handle voice recording
   function handleVoiceRecording() {
     if (!aiRecording) {
-      // Start recording
-      aiButton.classList.add("recording");
-      aiButton.querySelector("span").textContent = "Recording...";
-      
-      // Show listening indicator and animate waveform
-      if (listeningIndicator) {
-        listeningIndicator.style.display = "flex";
-      }
-      
-      if (waveform) {
-        waveform.classList.add("active");
-      }
-      
-      // Show empty state if no contact is selected
-      if (!currentReceiver && emptyStateContainer) {
-        emptyStateContainer.style.display = "flex";
-      }
-      
-      navigator.mediaDevices.getUserMedia({ audio: true })
-      .then((stream) => {
-        aiMediaRecorder = new MediaRecorder(stream);
-        aiMediaRecorder.start();
-        aiRecording = true;
-        aiAudioChunks = [];
+        // Start recording
+        aiButton.classList.add("recording");
+        aiButton.querySelector("span").textContent = "Recording...";
         
-        aiMediaRecorder.addEventListener("dataavailable", (event) => {
-          aiAudioChunks.push(event.data);
-        });
-        
-        aiMediaRecorder.addEventListener("stop", () => {
-          aiRecording = false;
-          aiButton.classList.remove("recording");
-          aiButton.querySelector("span").textContent = "Voice Message";
-          
-          // Hide listening indicator and stop waveform animation
-          if (listeningIndicator) {
-            listeningIndicator.style.display = "none";
-          }
-          
-          if (waveform) {
-            waveform.classList.remove("active");
-          }
-          
-          // Create a Blob from recorded chunks
-          const audioBlob = new Blob(aiAudioChunks, { type: "audio/webm" });
-          processAudio(audioBlob);
-        });
-      })
-      .catch(err => {
-        aiRecording = false;
-        aiButton.classList.remove("recording");
-        aiButton.querySelector("span").textContent = "Voice Message";
-        showSystemMessage("Microphone access denied");
-        
-        // Hide listening indicator and stop waveform animation
+        // Show listening indicator and animate waveform
         if (listeningIndicator) {
-          listeningIndicator.style.display = "none";
+            listeningIndicator.style.display = "flex";
         }
         
         if (waveform) {
-          waveform.classList.remove("active");
+            waveform.classList.add("active");
         }
-      });
+        
+        // Update voice status
+        updateVoiceStatus("Listening...");
+        
+        navigator.mediaDevices.getUserMedia({ audio: true })
+        .then((stream) => {
+            aiMediaRecorder = new MediaRecorder(stream);
+            aiMediaRecorder.start();
+            aiRecording = true;
+            aiAudioChunks = [];
+            
+            aiMediaRecorder.addEventListener("dataavailable", (event) => {
+                aiAudioChunks.push(event.data);
+            });
+            
+            aiMediaRecorder.addEventListener("stop", () => {
+                aiRecording = false;
+                aiButton.classList.remove("recording");
+                aiButton.querySelector("span").textContent = "Voice Message";
+                
+                // Hide listening indicator and stop waveform animation
+                if (listeningIndicator) {
+                    listeningIndicator.style.display = "none";
+                }
+                
+                if (waveform) {
+                    waveform.classList.remove("active");
+                }
+                
+                // Create a Blob from recorded chunks
+                const audioBlob = new Blob(aiAudioChunks, { type: "audio/webm" });
+                processAudio(audioBlob);
+            });
+        })
+        .catch(err => {
+            aiRecording = false;
+            aiButton.classList.remove("recording");
+            aiButton.querySelector("span").textContent = "Voice Message";
+            updateVoiceStatus("Microphone access denied");
+            
+            // Hide listening indicator and stop waveform animation
+            if (listeningIndicator) {
+                listeningIndicator.style.display = "none";
+            }
+            
+            if (waveform) {
+                waveform.classList.remove("active");
+            }
+        });
     } else if (aiMediaRecorder && aiMediaRecorder.state !== "inactive") {
-      // Stop recording
-      aiMediaRecorder.stop();
+        // Stop recording
+        aiMediaRecorder.stop();
     }
   }
 
@@ -969,68 +978,6 @@ document.addEventListener("DOMContentLoaded", () => {
   function handleContactClick(contactElement) {
     // Get the username from the contact element
     const contactUsername = contactElement.querySelector("span:not(.status-indicator)").textContent;
-    
-    // If we have a conversation in progress, just update the recipient without navigating
-    if (window.currentConversationState) {
-        // Update the recipient in conversation state
-        window.currentConversationState.recipient = contactUsername;
-        
-        // Show confirmation of recipient selection
-        showSystemMessage(`Recipient set to: ${contactUsername}`, true);
-        
-        // If we have a final message ready, update the recipient display
-        if (window.currentConversationState.final_message) {
-            // Remove existing recipient info and system messages
-            clearSystemMessages();
-            document.querySelectorAll(".message-bubble.preview, .primary-button").forEach(el => el.remove());
-            
-            // Get messages container
-            const messagesContainer = document.getElementById("messages");
-            
-            // Create a preview of the final message - ALWAYS use final_message
-            const previewBubble = document.createElement("div");
-            previewBubble.className = "message-bubble preview";
-            previewBubble.style.backgroundColor = "#f0f0ff";
-            previewBubble.style.border = "2px solid #6366f1";
-            previewBubble.style.color = "#000";
-            previewBubble.style.margin = "10px 0";
-            previewBubble.style.padding = "15px";
-            
-            // Log the final message to debug
-            console.log("Final message for contact change preview:", window.currentConversationState.final_message);
-            
-            // Create a simple direct display of the message without fancy structure
-            previewBubble.innerHTML = `
-                <div style="font-weight: bold; margin-bottom: 10px; color: #6366f1; border-bottom: 1px solid #6366f1; padding-bottom: 5px;">
-                    Preview of message to be sent:
-                </div>
-                <div style="white-space: pre-wrap; font-size: 15px; line-height: 1.5;">
-                    ${window.currentConversationState.final_message || "No message to send. Please try again."}
-                </div>
-            `;
-            
-            // Add to messages container
-            messagesContainer.appendChild(previewBubble);
-            
-            // Then show instructions - ENGLISH ONLY
-            const instructionsDiv = document.createElement("div");
-            instructionsDiv.className = "message-bubble system";
-            instructionsDiv.style.marginTop = "10px";
-            instructionsDiv.textContent = "Your message is ready to send. Say 'send' or click the button below to confirm.";
-            messagesContainer.appendChild(instructionsDiv);
-            
-            // Add a confirmation button
-            const confirmButton = document.createElement("button");
-            confirmButton.className = "primary-button";
-            confirmButton.style.margin = "10px auto";
-            confirmButton.style.display = "block";
-            confirmButton.textContent = "Send Message";
-            confirmButton.onclick = sendFinalMessage;
-            messagesContainer.appendChild(confirmButton);
-        }
-        
-        return; // Don't navigate to chat
-    }
     
     // Remove selected class from all contacts
     document.querySelectorAll(".contact-item.selected").forEach(element => {
@@ -1042,22 +989,59 @@ document.addEventListener("DOMContentLoaded", () => {
     
     // Store selected user
     window.selectedUser = contactUsername;
+    currentReceiver = contactUsername; // For backward compatibility with message notifications
     
-    // Update chat header
-    document.getElementById("chatRecipient").textContent = contactUsername;
+    // Update chat header to show selected recipient
+    document.getElementById("chatRecipient").textContent = `Message to: ${contactUsername}`;
     
-    // Hide empty state container
-    if (document.getElementById("emptyStateContainer")) {
-        document.getElementById("emptyStateContainer").style.display = "none";
+    // Show the view history button
+    const viewHistoryButton = document.getElementById("viewHistoryButton");
+    if (viewHistoryButton) {
+      viewHistoryButton.style.display = "inline-flex";
+      // Reset button text in case it was changed
+      viewHistoryButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px; vertical-align: text-bottom;">
+        <circle cx="12" cy="12" r="10"></circle>
+        <polyline points="12 6 12 12 16 14"></polyline>
+      </svg>
+      View Message History`;
     }
     
-    // Load chat history
-    loadChatHistory(contactUsername);
+    // If message history is currently visible, load it for the new contact
+    if (messagesContainer && messagesContainer.style.display !== "none") {
+      loadChatHistory(contactUsername);
+    } else {
+      // Hide the messages container if it's visible
+      if (messagesContainer) {
+        messagesContainer.style.display = "none";
+      }
+    }
+    
+    // If we have an active conversation, update the recipient
+    if (window.currentConversationState) {
+        window.currentConversationState.recipient = contactUsername;
+        
+        // If we have a final message ready, update the preview
+        if (window.currentConversationState.final_message && window.currentConversationState.ready_to_send) {
+            // Update preview header
+            const messagePreview = document.getElementById('messagePreview');
+            const previewHeader = messagePreview.querySelector('h3');
+            previewHeader.textContent = `Message to ${contactUsername}`;
+            
+            // Make sure the preview is visible
+            messagePreview.style.display = 'block';
+        }
+    }
+    
+    // Update voice status
+    updateVoiceStatus(`Ready to record message for ${contactUsername}`);
   }
 
-  // Remove any system messages when displaying a preview
+  // Remove unneeded functions
+  // sendTextMessage is not needed anymore since we're using voice only
+
+  // Clear system messages function can be simplified
   function clearSystemMessages() {
-    // Remove any existing system messages
-    document.querySelectorAll(".message-bubble.system:not(.recipient-info)").forEach(el => el.remove());
+    // Just update the voice status to default
+    updateVoiceStatus("Press the microphone button to start recording");
   }
 });

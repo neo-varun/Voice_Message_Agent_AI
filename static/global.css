@@ -469,11 +469,34 @@ button {
   padding: 24px;
   overflow-y: auto;
   gap: 16px;
-  background-color: var(--background);
+  background-color: var(--surface);
   justify-content: flex-start;
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  max-height: 70vh;
+  min-height: 500px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  margin: 15px auto 30px;
+  width: 100%;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Message content and timestamp styling */
+.message-content {
+  margin-bottom: 4px;
+}
+
+.message-timestamp {
+  font-size: 11px;
+  opacity: 0.7;
+  margin-top: 4px;
+  text-align: right;
+}
+
+.message-bubble.incoming .message-timestamp {
+  text-align: left;
 }
 
 /* Message Bubbles */
@@ -488,20 +511,7 @@ button {
   word-wrap: break-word;
 }
 
-.message-bubble.sender {
-  align-self: flex-end;
-  background-color: var(--primary);
-  color: white;
-  border-bottom-right-radius: 4px;
-}
-
-.message-bubble.receiver {
-  align-self: flex-start;
-  background-color: var(--surface);
-  color: var(--text-primary);
-  border-bottom-left-radius: 4px;
-}
-
+.message-bubble.sender,
 .message-bubble.outgoing {
   align-self: flex-end;
   background-color: var(--primary);
@@ -509,6 +519,7 @@ button {
   border-bottom-right-radius: 4px;
 }
 
+.message-bubble.receiver,
 .message-bubble.incoming {
   align-self: flex-start;
   background-color: var(--surface);
