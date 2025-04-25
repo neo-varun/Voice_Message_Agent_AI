@@ -1,0 +1,17 @@
+flask
+flask-socketio
+flask-sqlalchemy
+flask-cors
+python-dotenv
+sqlalchemy
+werkzeug
+pinecone-client
+openai
+google-cloud-texttospeech
+deepgram-sdk
+psycopg2-binary
+python-engineio
+python-socketio
+cryptography
+eventlet
+gunicorn
